@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!--
+    Flutter web entry point for Lead Capture CRM.
+    CHANGED from default:
+      • Added Firebase Messaging service worker registration
+      • Added PWA viewport meta
+      • Updated title and description
+      • Added theme-color meta
+  -->
+  <base href="/shanmugam/leadcapture/">
+
+  <!-- Monkey-patch Service Worker registration for subdirectory FCM support -->
+  <script>
+    (function() {
+      if ('serviceWorker' in navigator) {
+        const originalRegister = navigator.serviceWorker.register;
+        navigator.serviceWorker.register = function(scriptURL, options) {
+          if (typeof scriptURL === 'string' && scriptURL.indexOf('firebase-messaging-sw.js') !== -1) {
+            scriptURL = 'firebase-messaging-sw.js';
+            if (options && options.scope) {
+              options.scope = './';
+            }
+          }
+          return originalRegister.call(navigator.serviceWorker, scriptURL, options);
+        };
+      }
+    })();
+  </script>
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="LeadcaptureCRM — manage leads, deals, and teams.">
+
+  <!-- PWA / mobile web -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="LeadcaptureCRM">
+  <meta name="theme-color" content="#ffffff">
+  <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport">
+
+  <!-- Icons -->
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <link rel="icon" type="image/png" href="favicon.png">
+
+  <title>LeadcaptureCRM</title>
+  <link rel="manifest" href="manifest.json">
+
+  <!-- Splash screen styles (unchanged from original) -->
+  <style id="splash-screen-style">
+    html { height: 100% }
+    body {
+      margin: 0;
+      min-height: 100%;
+      background-color: #ffffff;
+      background-size: 100% 100%;
+    }
+    .center {
+      margin: 0;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      -ms-transform: translate(-50%, -50%);
+      transform: translate(-50%, -50%);
+    }
+    .contain  { display:block; width:100%; height:100%; object-fit: contain; }
+    .stretch  { display:block; width:100%; height:100%; }
+    .cover    { display:block; width:100%; height:100%; object-fit: cover; }
+    .bottom   { position: absolute; bottom: 0; left: 50%;
+                -ms-transform: translate(-50%, 0); transform: translate(-50%, 0); }
+    .bottomLeft  { position: absolute; bottom: 0; left: 0; }
+    .bottomRight { position: absolute; bottom: 0; right: 0; }
+  </style>
+
+  <script id="splash-screen-script">
+    function removeSplashFromWeb() {
+      document.getElementById("splash")?.remove();
+      document.getElementById("splash-branding")?.remove();
+      document.body.style.background = "transparent";
+    }
+  </script>
+</head>
+
+<body>
+  <picture id="splash">
+    <source srcset="splash/img/light-1x.png 1x, splash/img/light-2x.png 2x, splash/img/light-3x.png 3x, splash/img/light-4x.png 4x" media="(prefers-color-scheme: light)">
+    <source srcset="splash/img/dark-1x.png 1x, splash/img/dark-2x.png 2x, splash/img/dark-3x.png 3x, splash/img/dark-4x.png 4x" media="(prefers-color-scheme: dark)">
+    <img class="center" aria-hidden="true" src="splash/img/light-1x.png" alt="">
+  </picture>
+
+  <script src="flutter_bootstrap.js" async=""></script>
+
+  <!--
+    Firebase Messaging Service Worker registration.
+    Required for web push notifications (background messages).
+    The firebase-messaging-sw.js file must exist in the /web folder.
+  -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker
+          .register('firebase-messaging-sw.js')
+          .then(function (registration) {
+            console.log('FCM SW registered:', registration.scope);
+          })
+          .catch(function (err) {
+            console.log('FCM SW registration failed:', err);
+          });
+      });
+    }
+  </script>
+</body>
+</html>

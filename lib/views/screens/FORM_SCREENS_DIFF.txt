@@ -1,0 +1,115 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// FORM SCREENS MIGRATION GUIDE
+// Applies to: lead_create.dart, lead_edit.dart, deals_create.dart,
+//             deals_edit.dart, task_create.dart, task_edit.dart,
+//             feed_create.dart, feed_edit.dart, client_create.dart,
+//             client_edit.dart, and any other screen with file attachments.
+//
+// These screens use `List<File>` from dart:io. The new FilePick returns
+// `List<PlatformFile>` (from file_picker package) which works on both
+// web and native.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── CHANGE 1: Remove dart:io import (top of each file) ───────────────────────
+//
+// REMOVE:
+//   import 'dart:io';
+//
+// ADD (if not already present):
+//   import 'package:flutter/foundation.dart';
+//   import 'package:file_picker/file_picker.dart';
+
+// ── CHANGE 2: Change the attachment list type ─────────────────────────────────
+//
+// FIND:
+//   final List<File> _selectedAttachments = [];
+//
+// REPLACE WITH:
+//   final List<PlatformFile> _selectedAttachments = [];
+
+// ── CHANGE 3: File pick callback ──────────────────────────────────────────────
+//
+// FIND:
+//   var files = await FilePick.pickFiles(context);
+//   if (files != null) {
+//     if (files.isNotEmpty) {
+//       _selectedAttachments.addAll(files);
+//       setState(() {});
+//     }
+//   }
+//
+// REPLACE WITH (no change needed — FilePick.pickFiles now returns List<PlatformFile>):
+//   var files = await FilePick.pickFiles(context);
+//   if (files != null && files.isNotEmpty) {
+//     _selectedAttachments.addAll(files);
+//     setState(() {});
+//   }
+
+// ── CHANGE 4: Upload batch ────────────────────────────────────────────────────
+//
+// FIND (in submit handler):
+//   List<String> urls = await StorageService.uploadFilesInBatch(
+//     files: _selectedAttachments,
+//     folder: StorageFolder.leadAttachments,
+//   );
+//
+//   for (var i = 0; i < _selectedAttachments.length; i++) {
+//     var file = _selectedAttachments[i];
+//     var mimeType = lookupMimeType(file.path) ?? '';
+//     attachments.add(
+//       FileModel(
+//         name: path.basename(file.path),
+//         extension: path.extension(file.path).replaceAll('.', ''),
+//         size: file.lengthSync(),    // ← breaks on web
+//         ...
+//       ),
+//     );
+//   }
+//
+// REPLACE WITH:
+//   List<String> urls;
+//   if (kIsWeb) {
+//     urls = await StorageService.uploadBytesInBatch(
+//       files: _selectedAttachments
+//           .map((pf) => (bytes: pf.bytes!, fileName: pf.name))
+//           .toList(),
+//       folder: StorageFolder.leadAttachments,
+//     );
+//   } else {
+//     urls = await StorageService.uploadFilesInBatch(
+//       files: _selectedAttachments.map((pf) => File(pf.path!)).toList(),
+//       folder: StorageFolder.leadAttachments,
+//     );
+//   }
+//
+//   for (var i = 0; i < _selectedAttachments.length; i++) {
+//     final pf = _selectedAttachments[i];
+//     final ext = pf.name.contains('.') ? pf.name.split('.').last : '';
+//     attachments.add(
+//       FileModel(
+//         name: pf.name,
+//         extension: ext,
+//         size: pf.size,              // PlatformFile.size works on both platforms
+//         mimeType: lookupMimeType(pf.name) ?? '',
+//         url: urls[i],
+//       ),
+//     );
+//   }
+
+// ── CHANGE 5: Attachment chip display ────────────────────────────────────────
+//
+// FIND:
+//   children: _selectedAttachments.map((file) {
+//     return Chip(
+//       label: Text(path.basename(file.path)),
+//       onDeleted: () { _selectedAttachments.remove(file); setState(() {}); },
+//     );
+//   }).toList()
+//
+// REPLACE WITH:
+//   children: _selectedAttachments.map((pf) {
+//     return Chip(
+//       label: Text(pf.name),
+//       onDeleted: () { _selectedAttachments.remove(pf); setState(() {}); },
+//     );
+//   }).toList()

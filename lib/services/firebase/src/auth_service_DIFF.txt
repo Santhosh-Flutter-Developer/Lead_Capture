@@ -1,0 +1,34 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// auth_service.dart
+// CHANGED:
+//   • Removed `import 'dart:io'`  (was only used via Platform.isIOS implicitly
+//     through DeviceInfo which is now handled by conditional imports)
+//   • The kIsWeb guards at lines 224 and 277 were already present — no change.
+//   • The `kIsMobile` check at line 254 now works correctly because kIsMobile
+//     in platform.dart returns false on web.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── INSTRUCTION ──────────────────────────────────────────────────────────────
+// In auth_service.dart, make only ONE change:
+//
+// REMOVE line 1:
+//   import 'dart:io';
+//
+// That's it. All other code in this file is already web-safe:
+//   • kIsWeb guards at lines 224 and 277 already skip device tracking on web.
+//   • kIsMobile at line 254 returns false on web (fixed by platform.dart).
+//   • DeviceInfo.getDeviceInfo() now uses conditional imports (web-safe).
+//
+// No other edits needed in this file.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// FILE DIFF — apply this change manually:
+//
+// --- a/lib/services/firebase/src/auth_service.dart
+// +++ b/lib/services/firebase/src/auth_service.dart
+// @@ -1,4 +1,3 @@
+// -import 'dart:io';
+//
+//  import 'package:cloud_firestore/cloud_firestore.dart';
+//  import 'package:flutter/foundation.dart';
+//  import '/utils/utils.dart';

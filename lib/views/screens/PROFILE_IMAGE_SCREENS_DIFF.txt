@@ -1,0 +1,112 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// PROFILE IMAGE PICK SCREENS MIGRATION GUIDE
+// Applies to: employee_create.dart, employee_edit.dart, admin_create.dart,
+//             admin_edit.dart, admin_profile.dart, profile.dart,
+//             company_registration.dart, lead_create.dart (logo),
+//             client_create.dart (logo), and any screen with profile photo.
+//
+// PickImage.selectImage() now returns XFile? instead of File?.
+// StorageService now has uploadImageBytes() for web.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── CHANGE 1: Remove dart:io, add foundation ─────────────────────────────────
+//
+// REMOVE:
+//   import 'dart:io';
+//
+// ADD:
+//   import 'dart:io' show File;        ← keep only if File is still used elsewhere
+//   import 'package:flutter/foundation.dart';
+//   import 'package:image_picker/image_picker.dart';
+
+// ── CHANGE 2: Change state variable type ─────────────────────────────────────
+//
+// FIND:
+//   File? _selectedProfileImage;
+//
+// REPLACE WITH:
+//   XFile? _selectedProfileImage;
+
+// ── CHANGE 3: Image picker call ───────────────────────────────────────────────
+//
+// FIND (after camera capture):
+//   final rotated = await FlutterExifRotation.rotateImage(path: xFile.path);
+//   if (mounted) {
+//     setState(() { _selectedProfileImage = rotated; });
+//   }
+//
+// REPLACE WITH (PickImage.captureImage() already handles rotation via conditional import):
+//   final captured = await PickImage.captureImage();
+//   if (captured != null && mounted) {
+//     setState(() { _selectedProfileImage = captured; });
+//   }
+//
+// FIND (_pickImageFromFile for Windows / web):
+//   final imageFile = File(pickedPath);
+//   setState(() { _selectedProfileImage = imageFile; });
+//
+// REPLACE WITH:
+//   // kIsWeb: file_picker gives bytes in PlatformFile.bytes
+//   // Windows / desktop: file_picker gives a path
+//   if (kIsWeb) {
+//     // Convert PlatformFile bytes → XFile (image_picker compatible)
+//     final pf = result.files.single;
+//     // Store bytes for later upload
+//     _webImageBytes = pf.bytes;
+//     // Create a fake XFile for display
+//     _selectedProfileImage = XFile.fromData(pf.bytes!, name: pf.name);
+//   } else {
+//     _selectedProfileImage = XFile(pickedPath);
+//   }
+//   setState(() {});
+
+// ── CHANGE 4: Profile image display in UI ────────────────────────────────────
+//
+// Wherever you show the selected image:
+//
+// FIND:
+//   _selectedProfileImage != null
+//     ? Image.file(_selectedProfileImage!)
+//     : ...
+//
+// REPLACE WITH:
+//   _selectedProfileImage != null
+//     ? (kIsWeb
+//         ? Image.network(_selectedProfileImage!.path)   // blob URL on web
+//         : Image.file(File(_selectedProfileImage!.path)))
+//     : ...
+//
+// OR simpler — use XFile.readAsBytes() which works everywhere:
+//   FutureBuilder<Uint8List>(
+//     future: _selectedProfileImage!.readAsBytes(),
+//     builder: (ctx, snap) => snap.hasData
+//       ? Image.memory(snap.data!)
+//       : const CircularProgressIndicator(),
+//   )
+
+// ── CHANGE 5: Upload call ─────────────────────────────────────────────────────
+//
+// FIND:
+//   if (_selectedProfileImage != null) {
+//     profileImageUrl = await StorageService.uploadFile(
+//       file: _selectedProfileImage!,
+//       folder: StorageFolder.userPhotos,
+//     );
+//   }
+//
+// REPLACE WITH:
+//   if (_selectedProfileImage != null) {
+//     profileImageUrl = await xFileToUploadUrl(
+//       _selectedProfileImage!,
+//       StorageFolder.userPhotos,
+//     );
+//     // xFileToUploadUrl() is imported from '/utils/utils.dart' (pick_image.dart)
+//     // It handles kIsWeb → bytes upload vs native → File upload automatically.
+//   }
+
+// ── CHANGE 6: Remove FlutterExifRotation import ───────────────────────────────
+//
+// REMOVE (if present in the screen file):
+//   import 'package:flutter_exif_rotation/flutter_exif_rotation.dart';
+//
+// It is now handled inside pick_image_io.dart via conditional import.

@@ -1,0 +1,58 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// attendance_export_service.dart  — PARTIAL PATCH
+// CHANGED: Only the two stub methods need to be filled in.
+// Everything else in the file is unchanged.
+//
+// FIND and REPLACE the two stub methods shown below.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── CHANGE 1: Add dart:html conditional import at top of file ────────────────
+//
+// After the existing imports, add:
+//
+//   import 'attendance_export_web.dart'
+//       if (dart.library.io) 'attendance_export_io.dart'
+//       show webDownloadFile, nativeSaveAndOpen;
+//
+// ── CHANGE 2: Replace _webDownload() stub ────────────────────────────────────
+//
+// FIND:
+//   static void _webDownload({
+//     required Uint8List bytes,
+//     required String filename,
+//     required String mimeType,
+//   }) {
+//     // Web download implementation
+//     // This would use dart:html or similar for web
+//     debugPrint('Web download: $filename (${bytes.length} bytes)');
+//   }
+//
+// REPLACE WITH:
+//   static void _webDownload({
+//     required Uint8List bytes,
+//     required String filename,
+//     required String mimeType,
+//   }) {
+//     webDownloadFile(bytes: bytes, filename: filename, mimeType: mimeType);
+//   }
+//
+// ── CHANGE 3: Replace _saveToFileAndOpen() stub ──────────────────────────────
+//
+// FIND:
+//   static Future<void> _saveToFileAndOpen(
+//     Uint8List bytes,
+//     String filename,
+//   ) async {
+//     // Mobile/Desktop save implementation
+//     // This would use path_provider and open_file packages
+//     debugPrint('Save to file: $filename (${bytes.length} bytes)');
+//   }
+//
+// REPLACE WITH:
+//   static Future<void> _saveToFileAndOpen(
+//     Uint8List bytes,
+//     String filename,
+//   ) async {
+//     await nativeSaveAndOpen(bytes: bytes, filename: filename);
+//   }
+// ─────────────────────────────────────────────────────────────────────────────

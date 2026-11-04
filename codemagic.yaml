@@ -1,0 +1,68 @@
+workflows:
+  macos-release:
+    name: macOS Release (External Testing)
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+
+    environment:
+      flutter: stable
+      xcode: latest
+
+    scripts:
+      - name: Flutter doctor
+        script: flutter doctor -v
+
+      - name: Get dependencies
+        script: flutter pub get
+
+      - name: Enable macOS
+        script: flutter config --enable-macos-desktop
+
+      - name: Build macOS release
+        script: flutter build macos --release
+
+      # - name: Zip .app (auto-detect)
+      #   script: |
+      #     cd build/macos/Build/Products/Release
+      #     APP_NAME=$(ls *.app | head -n 1)
+      #     echo "Found app: $APP_NAME"
+      #     zip -r "${APP_NAME}.zip" "$APP_NAME"
+
+      - name: Install create-dmg
+        script: brew install create-dmg
+
+      - name: Package macOS app (ZIP + DMG – CI safe)
+        script: |
+          set -e
+          cd build/macos/Build/Products/Release
+
+          echo "Listing release directory:"
+          ls -la
+
+          APP_PATH=$(find . -maxdepth 1 -type d -name "*.app" | head -n 1)
+
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app bundle found"
+            exit 1
+          fi
+
+          APP_NAME=$(basename "$APP_PATH")
+          APP_BASE="${APP_NAME%.app}"
+
+          echo "Found app: $APP_NAME"
+
+          # ZIP (always safe)
+          zip -r "${APP_BASE}.app.zip" "$APP_NAME"
+
+          # SIMPLE DMG (NO Finder / NO AppleScript)
+          hdiutil create \
+            -volname "$APP_BASE" \
+            -srcfolder "$APP_NAME" \
+            -ov \
+            -format UDZO \
+            "${APP_BASE}.dmg"
+
+    artifacts:
+      - build/macos/Build/Products/Release/*.app
+      - build/macos/Build/Products/Release/*.zip
+      - build/macos/Build/Products/Release/*.dmg

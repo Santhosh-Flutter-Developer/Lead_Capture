@@ -1,0 +1,12 @@
+export 'designation/designation.dart';
+export 'employee/employee.dart';
+export 'roles/roles.dart';
+export 'department/department.dart';
+export 'sub_department/sub_department.dart';
+export 'lead_category/lead_category.dart';
+export 'lead_status/lead_status.dart';
+export 'deal_status/deal_status.dart';
+export 'admin/admin.dart';
+export 'lead_source/lead_source.dart';
+export 'payment_mode/payment_mode.dart';
+export 'lead_priority/lead_priority.dart';

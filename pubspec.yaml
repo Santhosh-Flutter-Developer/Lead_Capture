@@ -1,0 +1,183 @@
+name: leadcapture
+description: "A new Flutter project."
+
+publish_to: "none"
+
+version: 1.0.4+2
+
+environment:
+  sdk: ^3.9.2
+ 
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  flutter_native_splash: ^2.4.7
+  firebase_core: ^4.2.1
+  cloud_firestore: ^6.1.0
+  crypto: ^3.0.7
+  firebase_messaging: ^16.0.4
+  flutter_local_notifications: ^19.5.0
+  provider: ^6.1.5+1
+  shared_preferences: ^2.5.3
+  package_info_plus: ^9.0.0
+  loading_animation_widget: ^1.3.0
+  flutter_svg: ^2.2.2
+  url_launcher: ^6.3.2
+  iconsax: ^0.0.8
+  font_awesome_flutter: ^10.12.0
+  line_icons: ^2.0.3
+  http: ^1.5.0
+  flutter_exif_rotation: ^0.5.2
+  image_picker: ^1.2.0
+  firebase_storage: ^13.0.4
+  uuid: ^4.5.2
+  responsive_grid: ^2.4.4
+  cached_network_image: ^3.4.1
+  shimmer: ^3.0.0
+  flutter_bloc: ^9.1.1
+  equatable: ^2.0.7
+  flutter_colorpicker: ^1.1.0
+  file_picker: ^10.3.3
+  # Paste screenshots / images / files and drag & drop into chat
+  # (web, windows, android, ios).
+  super_clipboard: ^0.9.1
+  super_drag_and_drop: ^0.9.1
+  path: ^1.9.1
+  flutter_dotenv: ^6.0.0
+  googleapis_auth: ^2.0.0
+  dio: ^5.9.0
+  path_provider: ^2.1.5
+  rxdart: ^0.28.0
+  photo_view: ^0.15.0
+  syncfusion_flutter_charts: ^31.2.5
+  intl: ^0.20.2
+  flutter_markdown: ^0.7.7+1
+  any_link_preview: ^3.0.3
+  open_file: ^3.5.10
+  permission_handler: ^12.0.1
+  record: ^6.2.1
+  syncfusion_flutter_pdfviewer: ^31.2.5
+  device_info_plus: ^12.2.0
+  just_audio: ^0.10.5
+  video_player: ^2.10.0
+  chewie: ^1.8.5
+  mime: ^2.0.0
+  dotted_border: ^3.1.0
+  animated_custom_dropdown: ^3.1.1
+  another_flushbar: ^1.12.32
+  hive_flutter: ^1.1.0
+  local_notifier: ^0.1.6
+  window_manager: ^0.5.1
+  tray_manager: ^0.5.0
+  launch_at_startup: ^0.5.1
+  google_nav_bar: ^5.0.7
+  badges: ^3.1.2
+  pinput: ^5.0.2
+  cryptography: ^2.7.0
+  awesome_bottom_bar: ^1.2.4
+  encrypt: ^5.0.3
+  archive: ^4.0.7
+  xml: ^6.6.1
+  image: ^4.5.4
+  collection: ^1.19.1
+  pointycastle: ^3.9.1
+  fl_chart: ^1.1.1
+  timeago: ^3.7.1
+  carousel_slider: ^5.1.1
+  audioplayers: ^6.5.1
+  graphview: ^1.5.1
+  flutter_window_close: ^1.3.0
+  flutter_launcher_icons: ^0.14.4
+  get_time_ago: ^2.3.2
+  syncfusion_flutter_xlsio: ^31.2.18
+  localstore: ^1.4.0
+  downloadsfolder: ^1.2.0
+  syncfusion_flutter_calendar: ^31.2.18
+  pdf: ^3.11.1
+  table_calendar: ^3.2.0
+  flutter_face_api: ^8.1.765
+  image_cropper: ^12.2.1
+  geolocator: ^13.0.1
+  video_thumbnail: ^0.5.6
+
+# super_native_extensions 0.9.1 (used by super_clipboard / super_drag_and_drop)
+# caps device_info_plus at <12, but the app uses 12.x. It only reads the
+# Android SDK level in its drag-from-app code, which is the same in 12.x.
+# Remove this once a release with a wider constraint is on pub.dev.
+dependency_overrides:
+  device_info_plus: ^12.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+  msix: ^3.16.12
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/svg/
+    - assets/images/
+    - assets/audio/
+    - assets/templates/
+    - assets/icons/
+    - assets/data/
+    - assets/mobilefacenet.tflite
+    - shorebird.yaml
+
+  fonts:
+    - family: GoogleSans
+      fonts:
+        - asset: assets/fonts/GoogleSans-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/GoogleSans-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/GoogleSans-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/GoogleSans-Italic.ttf
+          style: italic
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  windows:
+    generate: true
+    image_path: "assets/images/company_logo.png"
+    icon_size: 48
+  macos:
+    generate: true
+    image_path: "assets/images/company_logo.png"
+    icon_size: 48
+  image_path: "assets/images/company_logo.png"
+  adaptive_icon_background: "#ffffff"
+  adaptive_icon_foreground: "assets/images/company_logo.png"
+
+flutter_native_splash:
+  color: "#ffffff"
+  image: "assets/images/company_logo.png"
+
+  android: true
+  ios: true
+
+# msix_config:
+#   display_name: AAATP
+#   publisher_display_name: Srisoftwarez
+#   identity_name: com.srisoftwarez.aaatp
+#   msix_version: 0.0.0.1
+#   logo_path: D:\Projects\aaatp\windows\runner\resources\app_icon.ico
+#   languages: en-us
+#   capabilities: internetClient
+#   certificate_path: D:\Projects\aaatp\ssl\OPENSSL.pfx
+#   certificate_password: Admin123@
+
+#   app_installer:
+#     publish_folder_path: D:\msix
+#     hours_between_update_checks: 0
+#     automatic_background_task: true
+#     update_blocks_activation: true
+#     show_prompt: true
+#     force_update_from_any_version: false
