@@ -15,7 +15,6 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter_native_splash: ^2.4.7
   firebase_core: ^4.2.1
-  cloud_firestore: ^6.1.0
   crypto: ^3.0.7
   firebase_messaging: ^16.0.4
   flutter_local_notifications: ^19.5.0
@@ -31,7 +30,6 @@ dependencies:
   http: ^1.5.0
   flutter_exif_rotation: ^0.5.2
   image_picker: ^1.2.0
-  firebase_storage: ^13.0.4
   uuid: ^4.5.2
   responsive_grid: ^2.4.4
   cached_network_image: ^3.4.1

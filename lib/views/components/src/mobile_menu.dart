@@ -178,11 +178,8 @@ class _MobileMenuState extends State<MobileMenu> {
         onTap: () async {
           await CacheService.syncAllCollections();
           var result = await AuthService.refreshLogin();
-          if (result['userData'] != null) {
-            var data = result["userData"];
-            var uid = result["uid"];
-
-            EmployeeModel emp = EmployeeModel.fromMap(uid, data);
+          if (result['employee'] != null) {
+            EmployeeModel emp = result['employee'] as EmployeeModel;
             await Spdb.setEmployeeLogin(
               model: emp,
               cid: result["collectionId"],

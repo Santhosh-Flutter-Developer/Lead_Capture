@@ -1,25 +1,49 @@
 import 'package:flutter/material.dart';
 import '/constants/constants.dart';
 import '/models/models.dart';
+import '/services/api/api.dart';
 import '/services/services.dart';
 
+/// Holidays via masters.php (type `holiday`: name + date). The server has no
+/// "days" field, so every holiday is a single day.
 class HolidayService {
-  static final FirebaseConfig firebase = FirebaseConfig();
+  static const _type = 'holiday';
+  static String _msg(Object e) => e is ApiException ? e.message : e.toString();
+
+  static String _ymd(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  static HolidayModel _map(Map<String, dynamic> m) {
+    final date = Js.dt(m['date']) ?? DateTime.now();
+    return HolidayModel(
+      uid: Js.s(m['uid']),
+      date: DateTime(date.year, date.month, date.day),
+      reason: Js.s(m['name']),
+      days: 1,
+      createdAt: Js.dt(m['created_at']),
+      updatedAt: Js.dt(m['updated_at'] ?? m['created_at']),
+      createdBy: UserDataModel(
+        uid: Js.s(m['created_by']),
+        name: Js.s(m['created_by_name']),
+        profilePic: ApiConfig.resolveFileUrl(Js.opt(m['created_by_photo'])),
+        userType: UserType.employee,
+      ),
+    );
+  }
 
   static Future<String?> createHoliday({required HolidayModel holiday}) async {
     try {
-      var cid = await Spdb.getCid();
-      var docRef = await CommonService.add(
-        '${Collections.users.name}/$cid/${Collections.holidays.name}',
-        holiday.toMap(),
-        activity: '${holiday.reason} has been added as a holiday',
-      );
-
-      return docRef.id;
+      final res = (await MastersApiService.create(_type, {
+        'name': holiday.reason,
+        'date': _ymd(holiday.date),
+      }))
+          .ensureSuccess();
+      ApiLive.changed({'holiday'});
+      return Js.opt(res.dataMap['uid']);
     } catch (e, st) {
-      debugPrint("${e.toString()}, ${st.toString()}");
+      debugPrint("$e, $st");
       await ErrorService.recordError(e, st);
-      throw 'Error creating holiday: $e';
+      throw 'Error creating holiday: ${_msg(e)}';
     }
   }
 
@@ -28,178 +52,60 @@ class HolidayService {
     required HolidayModel holiday,
   }) async {
     try {
-      var cid = await Spdb.getCid();
-
-      await CommonService.update(
-        '${Collections.users.name}/$cid/${Collections.holidays.name}',
-        uid,
-        holiday.toUpdateMap(),
-        activity: '${holiday.reason} has been updated',
-      );
+      (await MastersApiService.update(_type, uid, {
+        'name': holiday.reason,
+        'date': _ymd(holiday.date),
+      }))
+          .ensureSuccess();
+      ApiLive.changed({'holiday'});
     } catch (e, st) {
-      debugPrint("${e.toString()}, ${st.toString()}");
+      debugPrint("$e, $st");
       await ErrorService.recordError(e, st);
-      throw 'Error updating holiday: $e';
+      throw 'Error updating holiday: ${_msg(e)}';
     }
   }
 
   static Future<HolidayModel> getHoliday({required String uid}) async {
-    try {
-      final cid = await Spdb.getCid();
-
-      if (cid == null || cid.isEmpty) {
-        throw 'Invalid company id';
-      }
-
-      if (uid.isEmpty) {
-        throw 'Invalid holiday id';
-      }
-
-      final docRef = firebase.users
-          .doc(cid)
-          .collection(Collections.holidays.name)
-          .doc(uid);
-
-      final holidayDoc = await docRef.get();
-
-      if (!holidayDoc.exists) {
-        throw 'Holiday not found';
-      }
-
-      final data = holidayDoc.data();
-      if (data == null) {
-        throw 'Holiday data is empty';
-      }
-
-      return HolidayModel.fromMap(holidayDoc.id, data);
-    } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("getHoliday error: $e\n$st");
-      throw 'Error loading holiday: $e';
+    final all = await getAllHolidays();
+    for (final h in all) {
+      if (h.uid == uid) return h;
     }
+    throw 'Error loading holiday: Holiday not found';
   }
 
   static Future<List<HolidayModel>> getAllHolidays() async {
     try {
-      var cid = await Spdb.getCid();
-
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.holidays.name)
-          .get();
-
-      debugPrint("Total Holiday Docs: ${querySnapshot.docs.length}");
-
-      List<HolidayModel> holidays = querySnapshot.docs.map((doc) {
-        return HolidayModel.fromMap(doc.id, doc.data());
-      }).toList();
-
-      // Sort by date
-      holidays.sort((a, b) => a.date.compareTo(b.date));
-
-      return holidays;
+      final res = (await MastersApiService.list(_type)).ensureSuccess();
+      final list = Js.mapList(res.data).map(_map).toList();
+      list.sort((a, b) => a.date.compareTo(b.date));
+      return list;
     } catch (e, st) {
       await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error fetching holidays: $e';
+      throw 'Error fetching holidays: ${_msg(e)}';
     }
   }
 
   static Future<List<HolidayModel>> getHolidaysByYear(int year) async {
-    try {
-      var cid = await Spdb.getCid();
-
-      var startOfYear = DateTime(year, 1, 1);
-      var endOfYear = DateTime(year, 12, 31, 23, 59, 59);
-
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.holidays.name)
-          .where('date', isGreaterThanOrEqualTo: startOfYear.millisecondsSinceEpoch)
-          .where('date', isLessThanOrEqualTo: endOfYear.millisecondsSinceEpoch)
-          .get();
-
-      debugPrint("Total Holiday Docs for $year: ${querySnapshot.docs.length}");
-
-      List<HolidayModel> holidays = querySnapshot.docs.map((doc) {
-        return HolidayModel.fromMap(doc.id, doc.data());
-      }).toList();
-
-      // Sort by date
-      holidays.sort((a, b) => a.date.compareTo(b.date));
-
-      return holidays;
-    } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error fetching holidays: $e';
-    }
+    final all = await getAllHolidays();
+    return all.where((h) => h.date.year == year).toList();
   }
 
   static Future<void> deleteHoliday({required String uid}) async {
     try {
-      var cid = await Spdb.getCid();
-
-      final docRef = await firebase.users
-          .doc(cid)
-          .collection(Collections.holidays.name)
-          .doc(uid)
-          .get();
-
-      final data = docRef.data() as Map<String, dynamic>;
-
-      await TrashService.moveToTrash(
-        docRef: docRef.reference,
-        docData: data,
-        reason: 'user_deleted',
-      );
-
-      await docRef.reference.delete();
-
-      var reason = data['reason'] != null ? data['reason'] as String : 'Holiday';
-
-      var user = await Spdb.getUser();
-      ActivityLogModel activityLogModel = ActivityLogModel(
-        userData: user,
-        activity: '$reason has been deleted',
-        description: 'User has deleted an entry in ${Collections.holidays.name}',
-        collection: '${Collections.users.name}/$cid/${Collections.holidays.name}',
-        docId: docRef.id,
-      );
-      await CommonService.add(
-        '${Collections.users.name}/$cid/${Collections.activityLogs.name}',
-        activityLogModel.toMap(),
-      );
+      (await MastersApiService.delete(_type, uid)).ensureSuccess();
+      ApiLive.changed({'holiday'});
     } catch (e, st) {
       await ErrorService.recordError(e, st);
-      debugPrint("Error deleting holiday: $e\n$st");
-      throw 'Error deleting holiday: $e';
+      throw 'Error deleting holiday: ${_msg(e)}';
     }
   }
 
   static Future<bool> isDateTaken(DateTime date, {String? excludeId}) async {
-    try {
-      var cid = await Spdb.getCid();
-      final dateMs = date.millisecondsSinceEpoch;
-
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.holidays.name)
-          .where('date', isEqualTo: dateMs)
-          .get();
-
-      if (querySnapshot.docs.isEmpty) return false;
-
-      // If excludeId is provided, check if the existing holiday is the same one
-      if (excludeId != null) {
-        return querySnapshot.docs.any((doc) => doc.id != excludeId);
-      }
-
-      return true;
-    } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("Error checking date: $e\n$st");
-      return false;
-    }
+    final all = await getAllHolidays();
+    return all.any((h) =>
+        h.uid != excludeId &&
+        h.date.year == date.year &&
+        h.date.month == date.month &&
+        h.date.day == date.day);
   }
 }

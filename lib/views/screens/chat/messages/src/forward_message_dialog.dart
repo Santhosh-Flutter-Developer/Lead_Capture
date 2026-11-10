@@ -104,16 +104,7 @@ class _ForwardMessageDialogState extends State<ForwardMessageDialog> {
       final cid = await Spdb.getCid();
       final me = widget.currentUserUid;
 
-      final snap = await FirebaseFirestore.instance
-          .collection(Collections.users.name)
-          .doc(cid)
-          .collection(Collections.chats.name)
-          .where('participants', arrayContains: me)
-          .get();
-
-      final chats = snap.docs
-          .map((d) => ChatModel.fromMap(d.id, d.data()))
-          .toList()
+      final chats = (await ChatService.getMyChats()).toList()
         ..sort(
           (a, b) => (b.updatedAt?.millisecondsSinceEpoch ?? 0).compareTo(
             a.updatedAt?.millisecondsSinceEpoch ?? 0,

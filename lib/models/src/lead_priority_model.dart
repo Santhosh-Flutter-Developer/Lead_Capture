@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import '/models/src/timestamp.dart';
 import '/utils/utils.dart';
 import '/models/models.dart';
 

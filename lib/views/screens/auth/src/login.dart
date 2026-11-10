@@ -93,11 +93,9 @@ class _LoginState extends State<Login> with SingleTickerProviderStateMixin {
         String? companyLogo = result["companyLogo"];
         FlushBar.show(context, "Login Successful");
 
-        bool isEmployee = result.containsKey("userData");
+        bool isEmployee = result["isAdmin"] != true;
         if (isEmployee) {
-          var data = result["userData"];
-          var uid = result["uid"];
-          EmployeeModel emp = EmployeeModel.fromMap(uid, data);
+          EmployeeModel emp = result["employee"] as EmployeeModel;
           if (emp.isInitialPasswordChanged == false) {
             Navigate.routeReplace(
               context,
@@ -127,8 +125,9 @@ class _LoginState extends State<Login> with SingleTickerProviderStateMixin {
             cid: result["collectionId"],
             logoUrl: companyLogo,
           );
-          RoleModel role = await RoleService.getRole(uid: emp.role);
-          await PermissionService.savePermissions(role.permissions);
+          await PermissionService.savePermissions(
+            result["permissions"] as List<PermissionModel>,
+          );
           await CacheService.syncAllCollections();
           if (kIsDesktop) {
             FirestoreNotificationListener.listenForNotifications();
@@ -137,29 +136,17 @@ class _LoginState extends State<Login> with SingleTickerProviderStateMixin {
           return;
         }
 
-        var data = result["adminData"];
-        var uid = result["uid"];
-        AdminModel admin = AdminModel.fromMap(uid, data);
+        AdminModel admin = result["admin"] as AdminModel;
         await Spdb.setAdminLogin(
           model: admin,
           cid: result["collectionId"],
           logoUrl: companyLogo,
         );
-        // await _storeDeviceLocationOnLogin();
         await PermissionService.savePermissions(AppStrings.permissionsTrueMap);
-         // Admin branch was missing this - the employee branch above already
-        // syncs lookup data (lead/deal statuses, categories, employees,
-        // etc.) before navigating in. Without it here too, an admin's
-        // first-ever login of a session lands on a Leads/Deals page with
-        // empty filter dropdowns until something else (browser refresh,
-        // manual sync, 6-hour timer) triggers a real sync.
+        // Sync lookup data (statuses, categories, employees…) before
+        // navigating so filter dropdowns are populated on first load.
         await CacheService.syncAllCollections();
-        await AuthService.saveLoginLogs(
-          log: LoginLogsModel(
-            loginAlert: (await LoginAlertDeviceInfo.getLoginAlertInfo()),
-            user: await Spdb.getUser(),
-          ),
-        );
+        // Login log is written by the PHP server during login.
         if (kIsDesktop) {
           FirestoreNotificationListener.listenForNotifications();
         }

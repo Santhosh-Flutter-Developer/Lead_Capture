@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:iconsax/iconsax.dart';
 import 'package:pinput/pinput.dart';
@@ -131,15 +130,10 @@ class _ForgotPasswordState extends State<ForgotPassword>
     try {
       futureLoading(context);
 
-      final otp = (100000 + Random().nextInt(900000)).toString();
-      _generatedOtp = otp;
-
-      final response = await EmailService.sendEmail(
-        to: [_email.text.trim()],
-        toName: ["${_emailData?['name'] ?? 'User'}"],
-        subject: "OTP for Password Reset",
-        message: EmailTemplates.otpEmail.replaceAll("{otp_code}", otp),
-      );
+      // The PHP server generates the OTP and e-mails it (auth.php send_otp);
+      // the code itself is never sent to the app.
+      final response = await AuthService.sendResetOtp(_email.text.trim());
+      if (response) _generatedOtp = 'sent';
 
       if (Navigator.canPop(context)) {
         Navigator.pop(context);
@@ -194,22 +188,34 @@ class _ForgotPasswordState extends State<ForgotPassword>
   }
 
   /// Verify OTP entered by user
-  void _verifyOtp() {
+  Future<void> _verifyOtp() async {
     if (_generatedOtp == null) {
       FlushBar.show(context, "OTP expired. Please resend.", isSuccess: false);
       return;
     }
-
-    if (_otp.text.trim() == _generatedOtp) {
+    if (_isProcessing) return;
+    setState(() => _isProcessing = true);
+    try {
+      final token = await AuthService.verifyResetOtp(
+        email: _email.text.trim(),
+        otp: _otp.text.trim(),
+      );
+      if (!mounted) return;
       FlushBar.show(context, "OTP verified successfully!");
       _timer?.cancel();
-      Navigate.route(context, ResetPassword(emailData: _emailData ?? {}));
-    } else {
+      Navigate.route(
+        context,
+        ResetPassword(emailData: {...?_emailData, 'reset_token': token}),
+      );
+    } catch (e) {
+      if (!mounted) return;
       FlushBar.show(
         context,
-        "Invalid OTP. Please try again.",
+        e.toString().isEmpty ? "Invalid OTP. Please try again." : e.toString(),
         isSuccess: false,
       );
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
     }
   }
 

@@ -291,6 +291,7 @@ class Spdb {
     try {
       final cn = await _connect();
       await cn.clear();
+      await SessionManager.clear(); // drop in-memory API token too
     } catch (e, st) {
       await ErrorService.recordError(e, st);
     }

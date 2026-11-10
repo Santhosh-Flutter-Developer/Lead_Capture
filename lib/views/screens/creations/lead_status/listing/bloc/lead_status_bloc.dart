@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import '/services/services.dart';
@@ -8,7 +7,6 @@ part 'lead_status_event.dart';
 part 'lead_status_state.dart';
 
 class LeadStatusBloc extends Bloc<LeadStatusEvent, LeadStatusState> {
-  FirebaseFirestore firestore = FirebaseFirestore.instance;
   List<LeadStatusModel> allLeadStatus = [];
 
   LeadStatusBloc() : super(LeadStatusLoading()) {
@@ -21,22 +19,12 @@ class LeadStatusBloc extends Bloc<LeadStatusEvent, LeadStatusState> {
     Emitter<LeadStatusState> emit,
   ) async {
     emit(LeadStatusLoading());
-    var cid = await Spdb.getCid();
-
     await emit.forEach(
-      firestore
-          .collection(Collections.users.name)
-          .doc(cid)
-          .collection(Collections.leadStatus.name)
-          .orderBy('orderNumber', descending: true)
-          .snapshots()
-          .map((snapshot) {
-            allLeadStatus = snapshot.docs
-                .map((doc) => LeadStatusModel.fromMap(doc.id, doc.data()))
-                .toList();
-
-            return allLeadStatus;
-          }),
+      ApiLive.watch({'lead_status'}, () async {
+        allLeadStatus = await LeadStatusService.getAllLeadStatus();
+        allLeadStatus.sort((a, b) => b.orderNumber.compareTo(a.orderNumber));
+        return allLeadStatus;
+      }),
       onData: (leadStatus) => LeadStatusLoaded(leadStatus),
       onError: (error, stackTrace) {
         return LeadStatusError("Failed to load leadStatus, $error");

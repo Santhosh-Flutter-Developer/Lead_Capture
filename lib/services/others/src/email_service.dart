@@ -1,8 +1,12 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import '/services/services.dart';
 
+/// Generic client-side e-mail sending is NOT available any more.
+///
+/// The old implementation POSTed to a Firebase Cloud Function and shipped
+/// the SMTP username/PASSWORD inside the app binary. The PHP API has no
+/// "send e-mail" endpoint (it sends OTP / reset mails itself, server-side),
+/// so this now returns false without sending anything. Callers already
+/// ignore the result. See MISSING_API_REQUIREMENTS.md.
 class EmailService {
   static Future<bool> sendEmail({
     required List<String> to,
@@ -10,38 +14,7 @@ class EmailService {
     required String subject,
     required String message,
   }) async {
-    try {
-      var response = await http.post(
-        Uri.parse(
-          "https://us-central1-leadcapture-79a43.cloudfunctions.net/sendEmail",
-        ),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          "smtp_host": "smtp.gmail.com",
-          "smtp_user": "systemadmin@srisoftwarez.com",
-          "smtp_pass": "mxlfsavbqgrbhmrq",
-          "from": "systemadmin@srisoftwarez.com",
-          "from_name": "LeadcaptureCRM",
-          "to": to.map((e) => e.trim()).toList().join(','),
-          "to_name": toName.map((e) => e.trim()).toList().join(','),
-          "reply_to": "systemadmin@srisoftwarez.com",
-          "subject": subject,
-          "message": message,
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        return true;
-      } else {
-        debugPrint(
-          "Failed to send email. Status code: ${response.statusCode}, Body: ${response.body}",
-        );
-        return false;
-      }
-    } catch (e, st) {
-      debugPrint("Error resetting password: $e, $st");
-      await ErrorService.recordError(e, st);
-      return false;
-    }
+    debugPrint('EmailService: "$subject" not sent – no API endpoint for client e-mails.');
+    return false;
   }
 }

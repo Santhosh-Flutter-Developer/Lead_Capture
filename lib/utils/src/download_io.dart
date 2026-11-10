@@ -3,14 +3,13 @@
 // Freely uses dart:io since web never loads this file.
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:leadcapture/models/src/download_model.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
-import '/services/services.dart' show ErrorService, Spdb;
+import '/services/services.dart' show ErrorService, Spdb, DownloadHistoryStore;
 import '/theme/theme.dart';
 import '/views/views.dart';
 import '/utils/utils.dart';
@@ -76,7 +75,7 @@ Future<void> _logNativeDownload({
   required bool ok,
 }) async {
   try {
-    await FirebaseFirestore.instance.collection('download_history').add(
+    await DownloadHistoryStore.add(
           DownloadHistoryModel(
             fileName: fileName,
             filePath: filePath,
@@ -85,7 +84,7 @@ Future<void> _logNativeDownload({
             downloadedAt: DateTime.now(),
             isSuccess: ok,
             userId: await Spdb.getUid() ?? '',
-          ).toMap(),
+          ),
         );
   } catch (e) {
     debugPrint('download_history not saved: $e');

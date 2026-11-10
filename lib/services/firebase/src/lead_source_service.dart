@@ -1,27 +1,32 @@
 import 'package:flutter/material.dart';
-import '/constants/constants.dart';
+import '/utils/utils.dart';
 import '/models/models.dart';
 import '/services/services.dart';
-import '/utils/utils.dart';
 
+/// Lead source master – backed by masters.php?type=lead_source (no Firestore).
 class LeadSourceService {
-  static final FirebaseConfig firebase = FirebaseConfig();
+  static const String _type = MasterTypes.leadSource;
 
-  static Future<void> createLeadSource({
-    required LeadSourceModel leadSource,
-  }) async {
+  static Future<List<Map<String, dynamic>>> _rows() async {
+    final res = (await MastersApiService.list(_type)).ensureSuccess();
+    return res.dataList.map(Js.m).toList();
+  }
+
+  static Never _fail(Object e, StackTrace st) {
+    ErrorService.recordError(e, st);
+    debugPrint("$e, $st");
+    if (e is ApiException) throw e.message;
+    throw e.toString();
+  }
+
+  static Map<String, dynamic> _body(LeadSourceModel m) => {'name': m.name, 'description': m.description};
+
+  static Future<void> createLeadSource({required LeadSourceModel leadSource}) async {
     try {
-      var cid = await Spdb.getCid();
-
-      await CommonService.add(
-        '${Collections.users.name}/$cid/${Collections.leadSource.name}',
-        leadSource.toMap(),
-        activity: '${leadSource.name} has been added as a lead category',
-      );
+      (await MastersApiService.create(_type, _body(leadSource))).ensureSuccess();
+      ApiLive.changed(_type);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error creating leadSource: $e';
+      _fail(e, st);
     }
   }
 
@@ -30,180 +35,66 @@ class LeadSourceService {
     required LeadSourceModel leadSource,
   }) async {
     try {
-      var cid = await Spdb.getCid();
-
-      await CommonService.update(
-        '${Collections.users.name}/$cid/${Collections.leadSource.name}',
-        uid,
-        leadSource.toUpdateMap(),
-        activity: '${leadSource.name} has been updated',
-      );
+      (await MastersApiService.update(_type, uid, _body(leadSource))).ensureSuccess();
+      ApiLive.changed(_type);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error updating leadSource: $e';
+      _fail(e, st);
     }
   }
 
   static Future<LeadSourceModel> getLeadSource({required String uid}) async {
     try {
-      var cid = await Spdb.getCid();
-      var leadSourceDoc = await firebase.users
-          .doc(cid)
-          .collection(Collections.leadSource.name)
-          .doc(uid)
-          .get();
-
-      if (leadSourceDoc.exists) {
-        var leadSourceData = leadSourceDoc.data();
-        if (leadSourceData != null) {
-          var leadSource = LeadSourceModel.fromMap(
-            leadSourceDoc.id,
-            leadSourceData,
-          );
-          return leadSource;
-        } else {
-          throw 'Lead Source data is empty';
-        }
-      } else {
-        throw 'Lead Source not found';
-      }
+      final r = (await _rows()).where((r) => Js.s(r['uid']) == uid);
+      if (r.isEmpty) throw 'Lead source not found';
+      return ApiMappers.leadSource(r.first);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error creating leadSource: $e';
+      _fail(e, st);
     }
   }
 
   static Future<List<LeadSourceModel>> getAllLeadSource() async {
     try {
-      var cid = await Spdb.getCid();
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.leadSource.name)
-          .get();
-
-      List<LeadSourceModel> leadSource = querySnapshot.docs.map((doc) {
-        return LeadSourceModel.fromMap(doc.id, doc.data());
-      }).toList();
-
-      return leadSource;
+      return (await _rows()).map(ApiMappers.leadSource).toList();
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error fetching leadSource: $e';
+      _fail(e, st);
     }
   }
 
-  static Future<bool> isLeadSourceAssigned(String categoryUid) async {
-    try {
-      var cid = await Spdb.getCid();
-
-      final snapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.leads.name)
-          .where('leadSource', isEqualTo: categoryUid)
-          .limit(1)
-          .get();
-
-      return snapshot.docs.isNotEmpty;
-    } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("Error checking lead category assignment: $e\n$st");
-      return false;
-    }
-  }
+  /// The server refuses to delete a lead source that is in use and says
+  /// why, so no client-side pre-check is needed (deleteLeadSource surfaces it).
+  static Future<bool> isLeadSourceAssigned(String uid) async => false;
 
   static Future<void> deleteLeadSource({required String uid}) async {
     try {
-      var cid = await Spdb.getCid();
-
-      var docRef = await firebase.users
-          .doc(cid)
-          .collection(Collections.leadSource.name)
-          .doc(uid)
-          .get();
-
-      final data = docRef.data() as Map<String, dynamic>;
-      await TrashService.moveToTrash(
-        docRef: docRef.reference,
-        docData: data,
-        reason: 'user_deleted',
-      );
-
-      docRef.reference.delete();
-      var user = await Spdb.getUser();
-      ActivityLogModel activityLogModel = ActivityLogModel(
-        userData: user,
-        activity: '${data['name'].toString().decrypt} has been deleted',
-        description:
-            'User has deleted an entry in ${Collections.leadSource.name}',
-        collection:
-            '${Collections.users.name}/$cid/${Collections.leadSource.name}',
-        docId: docRef.id,
-      );
-      await CommonService.add(
-        '${Collections.users.name}/$cid/${Collections.activityLogs.name}',
-        activityLogModel.toMap(),
-      );
+      (await MastersApiService.delete(_type, uid)).ensureSuccess();
+      ApiLive.changed(_type);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error deleting lead category: $e';
+      _fail(e, st);
     }
   }
 
-  static Future<void> restoreLeadSource(LeadSourceModel source) async {
-    var cid = await Spdb.getCid();
-
-    final uid = source.uid;
-    if (uid == null || uid.isEmpty) {
-      throw Exception("UID missing");
-    }
-
-    await firebase.users
-        .doc(cid)
-        .collection(Collections.leadSource.name)
-        .doc(uid)
-        .set(source.toMap());
+  /// Trash restore is not exposed by masters.php (see MISSING_API_REQUIREMENTS.md).
+  static Future<void> restoreLeadSource(LeadSourceModel item) async {
+    throw 'Restoring a deleted lead source is not supported by the server yet.';
   }
 
-  static Future<LeadSourceModel> getByNameOrCreate({
-    required String name,
-  }) async {
+  static Future<LeadSourceModel> getByNameOrCreate({required String name}) async {
     try {
-      var cid = await Spdb.getCid();
-
-      final query = await firebase.users
-          .doc(cid)
-          .collection(Collections.leadSource.name)
-          .where('name', isEqualTo: name.encrypt)
-          .limit(1)
-          .get();
-
-      if (query.docs.isNotEmpty) {
-        final doc = query.docs.first;
-        return LeadSourceModel.fromMap(doc.id, doc.data());
+      final n = name.trim().toLowerCase();
+      for (final r in await _rows()) {
+        if (Js.s(r['name']).trim().toLowerCase() == n) return ApiMappers.leadSource(r);
       }
-
-      final newModel = LeadSourceModel(
-        name: name,
-        createdBy: await Spdb.getUser(),
-        description: '',
-      );
-
-      final docRef = await firebase.users
-          .doc(cid)
-          .collection(Collections.leadSource.name)
-          .add(newModel.toMap());
-
-      final createdDoc = await docRef.get();
-
-      return LeadSourceModel.fromMap(createdDoc.id, createdDoc.data()!);
+      final admin = await Spdb.getUser();
+      (await MastersApiService.create(_type, _body(LeadSourceModel(
+        name: name, description: '', createdBy: admin,
+      )))).ensureSuccess();
+      ApiLive.changed(_type);
+      for (final r in await _rows()) {
+        if (Js.s(r['name']).trim().toLowerCase() == n) return ApiMappers.leadSource(r);
+      }
+      throw 'Could not create lead source';
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("Error in getByNameOrCreate LeadSource: $e\n$st");
-      rethrow;
+      _fail(e, st);
     }
   }
 
@@ -212,26 +103,15 @@ class LeadSourceService {
     String? excludeUid,
   }) async {
     try {
-      var cid = await Spdb.getCid();
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.leadSource.name)
-          .get();
-
-      for (var doc in querySnapshot.docs) {
-        if (excludeUid != null && doc.id == excludeUid) continue;
-
-        var data = doc.data();
-        if (data['name'] != null &&
-            data['name'].toString().decrypt.trim().toLowerCase() ==
-                name.trim().toLowerCase()) {
-          return 'Lead Source name already exists';
+      for (final r in await _rows()) {
+        if (excludeUid != null && Js.s(r['uid']) == excludeUid) continue;
+        if (Js.s(r['name']).trim().toLowerCase() == name.trim().toLowerCase()) {
+          return 'Lead source name already exists';
         }
       }
       return null;
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
+      ErrorService.recordError(e, st);
       return 'Error checking lead source existence: $e';
     }
   }

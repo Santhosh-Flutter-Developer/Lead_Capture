@@ -1,90 +1,26 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '/models/models.dart';
-import '/constants/constants.dart';
-import '/services/services.dart';
+import '/services/api/api.dart';
 
+/// "Recent activity" on the dashboard. The server records activity itself
+/// (activity_logs) and returns the latest entries in dashboard.php
+/// `overview` → `recentActivities`, so nothing is written from the client.
 class RecentActivityService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
   Future<List<ActivityItem>> getRecentActivities() async {
-    final cid = await Spdb.getCid();
-    final userId = await Spdb.getUid();
-
-    final doc = await _firestore
-        .collection(Collections.users.name)
-        .doc(cid)
-        .collection(Collections.recentActivity.name)
-        .doc(userId)
-        .get();
-
-    if (!doc.exists) return [];
-
-    final List list = doc.data()!['activities'] ?? [];
-
-    return list.map((e) {
+    final res = (await DashboardApiService.overview(filter: 'All')).ensureSuccess();
+    final list = Js.mapList(res.dataMap['recentActivities']);
+    var i = 0;
+    return list.map((m) {
+      i++;
+      final page = Js.s(m['page']);
+      final action = Js.s(m['action']);
       return ActivityItem(
-        index: e['index'],
-        page: e['page'],
-        visitedAt: (e['visitedAt'] as Timestamp).toDate(),
+        index: i,
+        page: action.isEmpty ? page : '$page · $action',
+        visitedAt: DateTime.tryParse(Js.s(m['date_time'])) ?? DateTime.now(),
       );
     }).toList();
   }
 
-  Future<void> addActivity({required String page, int maxItems = 10}) async {
-    final cid = await Spdb.getCid();
-    final userId = await Spdb.getUid();
-
-    if (cid == null || userId == null) return;
-
-    final query = _firestore
-        .collection(Collections.users.name)
-        .doc(cid)
-        .collection(Collections.recentActivity.name)
-        .doc(userId);
-
-    final snapshot = await query.get();
-
-    List<Map<String, dynamic>> activities = [];
-
-    if (snapshot.exists) {
-      final doc = snapshot;
-
-      final data = doc.data();
-      if (data?['activities'] is List) {
-        activities = List<Map<String, dynamic>>.from(data?['activities']);
-      }
-    }
-
-    // 🔹 Remove same page if already exists
-    activities.removeWhere((e) => e['page'] == page);
-
-    // 🔹 Insert at top
-    activities.insert(0, {'page': page, 'visitedAt': DateTime.now()});
-
-    // 🔹 Limit items
-    if (activities.length > maxItems) {
-      activities = activities.take(maxItems).toList();
-    }
-
-    // 🔹 Recalculate index (CORRECT WAY)
-    for (int i = 0; i < activities.length; i++) {
-      activities[i]['index'] = i + 1;
-    }
-
-    if (snapshot.exists) {
-      await _firestore
-          .collection(Collections.users.name)
-          .doc(cid)
-          .collection(Collections.recentActivity.name)
-          .doc(userId)
-          .update({'activities': activities});
-    } else {
-      await _firestore
-          .collection(Collections.users.name)
-          .doc(cid)
-          .collection(Collections.recentActivity.name)
-          .doc(userId)
-          .set({'userId': userId, 'activities': activities});
-    }
-  }
+  /// No-op: the server logs activity.
+  Future<void> addActivity({required String page, int maxItems = 10}) async {}
 }

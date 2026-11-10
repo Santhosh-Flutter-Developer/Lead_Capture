@@ -7,11 +7,9 @@
 #include "generated_plugin_registrant.h"
 
 #include <audioplayers_windows/audioplayers_windows_plugin.h>
-#include <cloud_firestore/cloud_firestore_plugin_c_api.h>
 #include <downloadsfolder/downloadsfolder_plugin_c_api.h>
 #include <file_selector_windows/file_selector_windows.h>
 #include <firebase_core/firebase_core_plugin_c_api.h>
-#include <firebase_storage/firebase_storage_plugin_c_api.h>
 #include <flutter_window_close/flutter_window_close_plugin.h>
 #include <geolocator_windows/geolocator_windows.h>
 #include <irondash_engine_context/irondash_engine_context_plugin_c_api.h>
@@ -28,16 +26,12 @@
 void RegisterPlugins(flutter::PluginRegistry* registry) {
   AudioplayersWindowsPluginRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("AudioplayersWindowsPlugin"));
-  CloudFirestorePluginCApiRegisterWithRegistrar(
-      registry->GetRegistrarForPlugin("CloudFirestorePluginCApi"));
   DownloadsfolderPluginCApiRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("DownloadsfolderPluginCApi"));
   FileSelectorWindowsRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("FileSelectorWindows"));
   FirebaseCorePluginCApiRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("FirebaseCorePluginCApi"));
-  FirebaseStoragePluginCApiRegisterWithRegistrar(
-      registry->GetRegistrarForPlugin("FirebaseStoragePluginCApi"));
   FlutterWindowClosePluginRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("FlutterWindowClosePlugin"));
   GeolocatorWindowsRegisterWithRegistrar(

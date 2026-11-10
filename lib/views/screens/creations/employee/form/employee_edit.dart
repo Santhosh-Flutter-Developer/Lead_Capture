@@ -1,6 +1,5 @@
 import 'dart:typed_data';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -126,69 +125,8 @@ class _EmployeeEditState extends State<EmployeeEdit> {
             ? 'Yes'
             : 'No';
 
-        // Backward compatibility: older records converted to Admin before
-        // this fix don't have these fields on the admin document yet. For
-        // those, fall back to whatever was captured in the trash entry
-        // when the employee document was deleted.
-        try {
-          final cid = await Spdb.getCid();
-          final snap = await FirebaseFirestore.instance
-              .collection(Collections.users.name)
-              .doc(cid)
-              .collection(Collections.trash.name)
-              .where('documentId', isEqualTo: widget.uid)
-              .where('collection', isEqualTo: 'employees')
-              .limit(1)
-              .get();
-
-          if (snap.docs.isNotEmpty) {
-            final trashData = snap.docs.first.data();
-            final employeeData = trashData['data'] as Map<String, dynamic>?;
-            if (employeeData != null) {
-              employee = EmployeeModel.fromMap(widget.uid, employeeData);
-              _originalEmployee = employee;
-
-              _preservedEmployeeId = employee!.employeeId;
-              _preservedDesignation = employee!.designation;
-              _preservedDepartment = List.from(employee!.department ?? []);
-              _preservedSubDepartment = employee!.subDepartment;
-              _preservedGender = employee!.gender;
-              _preservedDateOfJoining = employee!.dateOfJoining.formatDate;
-              _preservedRole = employee!.role;
-              _preservedReportingTo = List.from(employee!.reportingTo ?? []);
-
-              // Only use the trashed values as a fallback when the admin
-              // document itself doesn't already have them.
-              if (widget.admin!.skills == null) {
-                _skillsController.text = employee!.skills;
-              }
-              if (widget.admin!.address == null) {
-                _addressController.text = employee!.address;
-              }
-              if (widget.admin!.about == null) {
-                _aboutController.text = employee!.about;
-              }
-              if (widget.admin!.loginAllowed == null) {
-                _loginAllowed = employee!.loginAllowed ? 'Yes' : 'No';
-              }
-              if (widget.admin!.receiveEmailNotifications == null) {
-                _receiveEmailNotifications =
-                    employee!.receiveEmailNotifications ? 'Yes' : 'No';
-              }
-              if (widget.admin!.maritalStatus == null) {
-                _maritalStatus = employee!.maritalStatus;
-              }
-              if (widget.admin!.employeeType == null) {
-                _employeeType = employee!.employeeType;
-              }
-              if (widget.admin!.outsideOffice == null) {
-                _outsideOffice = employee!.outsideOffice ? 'Yes' : 'No';
-              }
-            }
-          }
-        } catch (e) {
-          debugPrint("Failed to fetch employee from trash: $e");
-        }
+        // (The Firestore trash fallback for older converted records was removed:
+        // the server keeps one user record and has no trash lookup.)
       } else {
         _rolesList = await RoleService.getAllRoles();
         _designationList = await DesignationService.getAllDesignations();
@@ -1654,6 +1592,16 @@ _scrollController.dispose();
   void _submitForm() async {
     if (_formKey.currentState!.validate()) {
       try {
+        // employees.php `update` cannot change user_type, so switching an
+        // existing record between Admin and Employee is not possible.
+        if (isAdmin != (widget.admin != null)) {
+          FlushBar.show(
+            context,
+            'Changing a user between Admin and Employee is not supported by the server API.',
+            isSuccess: false,
+          );
+          return;
+        }
         if (isAdmin) {
           futureLoading(context);
 
@@ -1711,16 +1659,6 @@ _scrollController.dispose();
           );
 
           await AdminService.updateAdmin(id: widget.uid, data: adminModel);
-
-          // Delete the employee document since they're now an admin
-          try {
-            await EmployeeService.deleteEmployee(uid: widget.uid);
-          } catch (e) {
-            // If deleting fails, just log it but don't fail the whole process
-            debugPrint(
-              "Failed to delete employee document after converting to admin: $e",
-            );
-          }
 
           if (Navigator.canPop(context)) {
             Navigator.pop(context);
@@ -1794,36 +1732,10 @@ _scrollController.dispose();
             createdBy: await Spdb.getUser(),
           );
 
-          // Delete the admin document since they're now an employee
-          try {
-            await AdminService.deleteAdmin(uid: widget.uid);
-          } catch (e) {
-            debugPrint("Failed to delete admin document: $e");
-          }
-
-          final cid = await Spdb.getCid();
-          await FirebaseFirestore.instance
-              .collection(Collections.users.name)
-              .doc(cid)
-              .collection(Collections.employees.name)
-              .doc(widget.uid)
-              .set(employeeModel.toMap());
-
-          // Delete the trash entry for this employee
-          try {
-            final snap = await FirebaseFirestore.instance
-                .collection(Collections.users.name)
-                .doc(cid)
-                .collection(Collections.trash.name)
-                .where('documentId', isEqualTo: widget.uid)
-                .where('collection', isEqualTo: 'employees')
-                .get();
-            for (var doc in snap.docs) {
-              await doc.reference.delete();
-            }
-          } catch (e) {
-            debugPrint("Failed to delete trash entry: $e");
-          }
+          await EmployeeService.editEmployee(
+            uid: widget.uid,
+            employee: employeeModel,
+          );
 
           if (Navigator.canPop(context)) {
             Navigator.pop(context);

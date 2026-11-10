@@ -1,11 +1,10 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:dio/dio.dart';
 import 'package:leadcapture/models/src/download_model.dart';
 import 'package:path/path.dart' as path;
-import '/services/services.dart' show ErrorService, Spdb;
+import '/services/services.dart' show ErrorService, Spdb, DownloadHistoryStore;
 import '/theme/theme.dart';
 import '/views/views.dart';
 import '/utils/utils.dart';
@@ -73,13 +72,11 @@ class Download {
     }
   }
 
-  /// Best-effort history entry: a failure here (Firestore rules, offline)
+  /// Best-effort history entry: a failure here (storage error)
   /// must never turn a finished download into an error / stuck spinner.
   static Future<void> _logHistory(DownloadHistoryModel model) async {
     try {
-      await FirebaseFirestore.instance
-          .collection('download_history')
-          .add(model.toMap());
+      await DownloadHistoryStore.add(model);
     } catch (e) {
       debugPrint('download_history not saved: $e');
     }

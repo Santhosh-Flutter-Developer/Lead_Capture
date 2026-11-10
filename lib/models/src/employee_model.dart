@@ -6,7 +6,7 @@ import 'package:leadcapture/models/src/admin_model.dart';
 import '/utils/utils.dart';
 import 'user_data_model.dart';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
+import '/models/src/timestamp.dart';
 
 DateTime? parseDate(dynamic value) {
   if (value == null) return null;

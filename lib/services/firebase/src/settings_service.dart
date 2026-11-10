@@ -1,55 +1,39 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '/services/services.dart';
+import '/services/api/api.dart';
 import '/models/models.dart';
 
+/// Settings via settings.php (`get`, `update_preference`).
 class SettingsService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
-  static const String users = "users";
-  static const String settings = "settings";
-
-  Future<DocumentReference<Map<String, dynamic>>> _docRef() async {
-    final cid = await Spdb.getCid();
-    final uid = await Spdb.getUid();
-
-    if (cid == null || uid == null) {
-      throw StateError("User not logged in");
-    }
-
-    return _firestore.collection(users).doc(cid).collection(settings).doc(uid);
-  }
-
   Future<SettingsModel> fetchSettings() async {
-    final ref = await _docRef();
-    final snap = await ref.get();
-
-    if (!snap.exists) {
-      final uid = await Spdb.getUid();
-
-      final defaults = SettingsModel(
-        uid: uid,
-        emailNotification: true,
-        pushNotification: true,
-        inAppNotification: true,
-        showChats: true,
-        companyName: "",
-        appName: "",
-        timezone: "UTC",
-        language: "English",
-        dashboardLayout: "Default",
-        autoBackup: false,
-        payrollEnabled: true,
-      );
-
-      await ref.set(defaults.toMap());
-      return defaults;
-    }
-
-    return SettingsModel.fromMap(snap.data()!);
+    final res = (await SettingsApiService.call('get')).ensureSuccess();
+    final d = res.dataMap;
+    final p = Js.m(d['preferences']);
+    final c = Js.m(d['company']);
+    return SettingsModel(
+      uid: await Spdb.getUid(),
+      emailNotification: Js.b(p['emailNotification'], true),
+      pushNotification: Js.b(p['pushNotification'], true),
+      inAppNotification: Js.b(p['inAppNotification'], true),
+      showChats: !Js.b(p['hideChatPanel'], false),
+      companyName: Js.s(c['company_name']),
+      appName: Js.s(p['appName']),
+      timezone: Js.s(p['timezone'], 'Asia/Kolkata'),
+      language: Js.s(p['language'], 'English (US)'),
+      dashboardLayout: Js.s(p['dashboardLayout'], 'Default Overview'),
+      autoBackup: Js.b(p['autoBackup'], true),
+      payrollEnabled: false,
+    );
   }
 
+  /// Saves one preference (the app's `showChats` is stored as `hideChatPanel`).
   Future<void> updateField(String key, dynamic value) async {
-    final ref = await _docRef();
-    await ref.update({key: value});
+    var k = key;
+    var v = value;
+    if (key == 'showChats') {
+      k = 'hideChatPanel';
+      v = !(value == true);
+    }
+    (await SettingsApiService.call('update_preference', {'key': k, 'value': v}))
+        .ensureSuccess();
   }
 }

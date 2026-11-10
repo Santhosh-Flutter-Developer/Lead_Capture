@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -42,35 +41,6 @@ class _BackupListingState extends State<BackupListing> {
     Color(0xFF4364F7),
     Color(0xFF6FB1FC),
   ];
-
-  final Map<String, List<String>> _exampleSubcollectionsMap = {
-    'users': [
-      'activityLogs',
-      'admins',
-      'chats',
-      'clients',
-      'dealStatus',
-      'deals',
-      'departments',
-      'designations',
-      'employees',
-      'feed',
-      'leadCategory',
-      'leadStatus',
-      'leads',
-      'loginLogs',
-      'notifications',
-      'projects',
-      'roles',
-      'settings',
-      'subDepartments',
-      'tasks',
-      'trash',
-      'version',
-    ],
-    'chats': ['messages'],
-    'tasks': ['taskHistory', 'taskComments'],
-  };
 
   @override
   void dispose() {
@@ -203,15 +173,11 @@ class _BackupListingState extends State<BackupListing> {
   }
 
   Future<void> exportBackup(BuildContext context) async {
-    final List<String> paths = ['/users/KUsgiMjuGIdmQBMhFKNJ/'];
 
     try {
       setState(() => _busy = true);
 
-      final url = await _trigger.backupPaths(
-        paths,
-        subcollectionsMap: _exampleSubcollectionsMap,
-      );
+      final url = await _trigger.backupPaths(const []);
 
       if (!mounted) return;
 
@@ -229,7 +195,7 @@ class _BackupListingState extends State<BackupListing> {
         await _showResultDialog(
           context,
           'Backup Success',
-          'A new data snapshot has been created and uploaded to the secure vault.',
+          'A new data snapshot has been created on the server.',
           url: url,
         );
 
@@ -1039,7 +1005,7 @@ class _BackupListingState extends State<BackupListing> {
             if (url != null) ...[
               const SizedBox(height: 16),
               Text(
-                "VAULT URL",
+                "SERVER FILE",
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.bold,
@@ -1084,7 +1050,7 @@ class _BackupListingState extends State<BackupListing> {
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
         content: Text(
-          'This will remove the backup record from the registry. The storage file remains unaffected.',
+          'This removes the record from this list only. The file on the server is not deleted.',
           style: TextStyle(
             color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
@@ -1106,10 +1072,7 @@ class _BackupListingState extends State<BackupListing> {
       ),
     );
     if (ok == true) {
-      await FirebaseFirestore.instance
-          .collection('backups')
-          .doc(item.uid)
-          .delete();
+      BackupTrigger.sessionBackups.removeWhere((b) => b.uid == item.uid);
       if (!mounted) return;
       if (_selectedBackup?.uid == item.uid) {
         setState(() => _selectedBackup = null);

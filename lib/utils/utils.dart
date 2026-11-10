@@ -20,6 +20,5 @@ export 'src/aes_helper.dart';
 export 'src/deterministic_crypto.dart';
 export 'src/status_color.dart';
 export 'src/time_format.dart';
-export 'src/work_permission.dart';
 export 'src/xls_export.dart';
 

@@ -1552,7 +1552,7 @@ class FeedCardState extends State<FeedCard> {
                                                     createdAt: DateTime.now(),
                                                   );
                                                 
-                                                  await FeedService.addComment(
+                                                  final savedComment = await FeedService.addComment(
                                                     feedId: feedId,
                                                     comment: newComment,
                                                   );
@@ -1565,7 +1565,8 @@ class FeedCardState extends State<FeedCard> {
                                                         );
                                                     dialogComments.insert(
                                                       0,
-                                                      newComment,
+                                                      savedComment ??
+                                                          newComment,
                                                     );
                                                     dialogCommentController.clear();
                                                     isPostingComment = false;

@@ -1,6 +1,6 @@
 // ignore_for_file: public_member_api_docs, sort_constructors_first
 import 'dart:convert';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import '/models/src/timestamp.dart';
 import '/models/models.dart';
 
 class BackupModel {
@@ -77,26 +77,6 @@ class BackupModel {
     );
   }
 
-  factory BackupModel.fromFirestore(DocumentSnapshot doc) {
-    final map = doc.data() as Map<String, dynamic>;
-
-    return BackupModel(
-      uid: doc.id,
-      intiatedBy: map['intiatedBy'] is Map<String, dynamic>
-          ? UserDataModel.fromMap(map['intiatedBy'] as Map<String, dynamic>)
-          : UserDataModel.fromEmptyMap(),
-      parentCollectionId: map['parentCollectionId'] as String? ?? '',
-      path: map['path'] as String? ?? '',
-      type: map['type'] as String? ?? '',
-      size: map['size'] as int? ?? 0,
-      timestamp: map['timestamp'] is Timestamp
-          ? (map['timestamp'] as Timestamp).toDate()
-          : map['timestamp'] is int
-          ? DateTime.fromMillisecondsSinceEpoch(map['timestamp'] as int)
-          : DateTime.now(),
-      url: map['url'] as String? ?? '',
-    );
-  }
 
   String toJson() => json.encode(toMap());
 

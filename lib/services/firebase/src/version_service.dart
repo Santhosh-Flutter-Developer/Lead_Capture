@@ -8,11 +8,10 @@
 import 'package:flutter/foundation.dart';
 import '/models/models.dart';
 import '/utils/utils.dart';
-import '/constants/constants.dart';
+import '/services/api/api.dart';
 import '/services/services.dart';
 
 class VersionService {
-  static final FirebaseConfig firebase = FirebaseConfig();
   static VersionModel? _versionModel;
 
   static Future<void> init() async {
@@ -23,57 +22,29 @@ class VersionService {
     }
   }
 
+  /// settings.php `get` returns the server's APP_VERSION (one version for all
+  /// platforms, no download url / notes).
   static Future<VersionModel?> _checkForUpdates() async {
     try {
-      String? cid = await Spdb.getCid();
-      if (cid == null) return null;
+      if (!await Spdb.checkLogin()) return null;
+      final res = (await SettingsApiService.call('get')).ensureSuccess();
+      final latest = res.dataMap['version']?.toString() ?? '';
+      if (latest.isEmpty) return null;
 
-      // ── Web-safe platform string ──────────────────────────────────────────
       String platform;
       if (kIsWeb) {
         platform = 'web';
       } else {
-        switch (defaultTargetPlatform) {
-          case TargetPlatform.android:
-            platform = 'android';
-            break;
-          case TargetPlatform.iOS:
-            platform = 'ios';
-            break;
-          case TargetPlatform.windows:
-            platform = 'windows';
-            break;
-          case TargetPlatform.macOS:
-            platform = 'macos';
-            break;
-          case TargetPlatform.linux:
-            platform = 'linux';
-            break;
-          default:
-            platform = 'unknown';
-        }
+        platform = defaultTargetPlatform.name;
       }
 
-      var versionDoc = await firebase.users
-          .doc(cid)
-          .collection(Collections.version.name)
-          .where('platform', isEqualTo: platform)
-          .orderBy('timestamp', descending: true)
-          .limit(1)
-          .get();
-
-      if (versionDoc.docs.isEmpty) return null;
-
-      var versionData = versionDoc.docs.first.data();
-      var versionModel = VersionModel.fromMap(versionData);
-      var currentVersion = AppPackageInfo.version;
-      var latestVersion = versionData['version'].toString();
-
-      if (_isNewer(currentVersion, latestVersion)) {
-        versionModel.isUpdateNeed = true;
-      }
-
-      return versionModel;
+      final model = VersionModel(
+        version: latest,
+        platform: platform,
+        timestamp: DateTime.now(),
+      );
+      if (_isNewer(AppPackageInfo.version, latest)) model.isUpdateNeed = true;
+      return model;
     } catch (e, st) {
       await ErrorService.recordError(e, st);
       return null;

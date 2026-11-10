@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -10,8 +9,6 @@ part 'admin_event.dart';
 part 'admin_state.dart';
 
 class AdminBloc extends Bloc<AdminEvent, AdminState> {
-  final FirebaseFirestore firestore = FirebaseFirestore.instance;
-
   AdminBloc() : super(AdminLoading()) {
     on<StreamAdmins>(_streamAdmins);
     on<AddAdmin>(_addAdmin);
@@ -27,19 +24,8 @@ class AdminBloc extends Bloc<AdminEvent, AdminState> {
     emit(AdminLoading());
 
     try {
-      var cid = await Spdb.getCid();
-
       await emit.forEach<List<AdminModel>>(
-        firestore
-            .collection(Collections.users.name)
-            .doc(cid)
-            .collection(Collections.admins.name)
-            .snapshots()
-            .map(
-              (snapshot) => snapshot.docs
-                  .map((doc) => AdminModel.fromMap(doc.id, doc.data()))
-                  .toList(),
-            ),
+        ApiLive.watch({'admin'}, () => AdminService.getAllAdmins()),
         onData: (admins) => AdminLoaded(admins),
         onError: (e, st) => AdminError("Failed to load admins: $e"),
       );

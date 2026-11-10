@@ -1,10 +1,9 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:iconsax/iconsax.dart';
 import 'package:intl/intl.dart';
 import '/views/views.dart';
-import '/constants/constants.dart';
+import '/services/services.dart' show ErrorService;
 
 class DevColors {
   static const Color primary = Color(0xFF2563EB);
@@ -24,7 +23,6 @@ class AppErrors extends StatefulWidget {
 }
 
 class _AppErrorsState extends State<AppErrors> {
-  FirebaseFirestore firebase = FirebaseFirestore.instance;
   bool _loading = false;
   List<Map<String, dynamic>> _errors = [];
   Map<String, dynamic>? _selectedError;
@@ -53,24 +51,17 @@ class _AppErrorsState extends State<AppErrors> {
   Future<void> _loadErrors() async {
     setState(() => _loading = true);
     try {
-      final query = await firebase
-          .collection(Collections.errors.name)
-          .orderBy("time", descending: true)
-          .limit(100)
-          .get();
-
-      final List<Map<String, dynamic>> list = [];
-      for (var doc in query.docs) {
-        final data = doc.data();
+      final list = <Map<String, dynamic>>[];
+      for (final data in await ErrorService.recent()) {
         list.add({
-          "id": doc.id,
+          "id": "${data['time']}",
           "cid": data["cid"],
           "uid": data["uid"],
           "error": data["error"],
           "stackTrace": data["stackTrace"],
           "device": data["device"],
-          "time": data["time"] is Timestamp
-              ? (data["time"] as Timestamp).toDate()
+          "time": data["time"] is int
+              ? DateTime.fromMillisecondsSinceEpoch(data["time"] as int)
               : null,
         });
       }

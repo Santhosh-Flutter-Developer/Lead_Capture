@@ -1,27 +1,31 @@
 import 'package:flutter/material.dart';
-import '/constants/constants.dart';
+import '/utils/utils.dart';
 import '/models/models.dart';
 import '/services/services.dart';
-import '/utils/utils.dart';
 
+/// Sub department master – backed by masters.php?type=sub_department (no Firestore).
 class SubDepartmentService {
-  static final FirebaseConfig firebase = FirebaseConfig();
+  static const String _type = MasterTypes.subDepartment;
 
-  static Future<void> createSubDepartment({
-    required SubDepartmentModel subDepartment,
-  }) async {
+  static Future<List<Map<String, dynamic>>> _rows() async {
+    final res = (await MastersApiService.list(_type)).ensureSuccess();
+    return res.dataList.map(Js.m).toList();
+  }
+
+  static Never _fail(String prefix, Object e, StackTrace st) {
+    ErrorService.recordError(e, st);
+    debugPrint("$e, $st");
+    if (e is ApiException) throw e.message;
+    throw '$prefix: $e';
+  }
+
+  static Future<void> createSubDepartment({required SubDepartmentModel subDepartment}) async {
     try {
-      var cid = await Spdb.getCid();
-
-      await CommonService.add(
-        '${Collections.users.name}/$cid/${Collections.subDepartments.name}',
-        subDepartment.toMap(),
-        activity: '${subDepartment.name} has been added as a sub department',
-      );
+      (await MastersApiService.create(_type, {'name': subDepartment.name, 'description': subDepartment.description, 'department': subDepartment.department})).ensureSuccess();
+      ApiLookup.invalidate();
+      ApiLive.changed(_type);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error creating subDepartment: $e';
+      _fail('Error creating sub department', e, st);
     }
   }
 
@@ -30,121 +34,54 @@ class SubDepartmentService {
     required SubDepartmentModel subDepartment,
   }) async {
     try {
-      var cid = await Spdb.getCid();
-
-      await CommonService.update(
-        '${Collections.users.name}/$cid/${Collections.subDepartments.name}',
-        uid,
-        subDepartment.toUpdateMap(),
-        activity: '${subDepartment.name} has been updated',
-      );
+      (await MastersApiService.update(_type, uid, {'name': subDepartment.name, 'description': subDepartment.description, 'department': subDepartment.department})).ensureSuccess();
+      ApiLookup.invalidate();
+      ApiLive.changed(_type);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error updating subDepartment: $e';
+      _fail('Error updating sub department', e, st);
     }
   }
 
-  static Future<SubDepartmentModel> getSubDepartment({
-    required String uid,
-  }) async {
+  static Future<SubDepartmentModel> getSubDepartment({required String uid}) async {
     try {
-      var cid = await Spdb.getCid();
-      var subDepartmentDoc = await firebase.users
-          .doc(cid)
-          .collection(Collections.subDepartments.name)
-          .doc(uid)
-          .get();
-
-      if (subDepartmentDoc.exists) {
-        var subDepartmentData = subDepartmentDoc.data();
-        if (subDepartmentData != null) {
-          var subDepartment = SubDepartmentModel.fromMap(
-            subDepartmentDoc.id,
-            subDepartmentData,
-          );
-          return subDepartment;
-        } else {
-          throw 'SubDepartment data is empty';
-        }
-      } else {
-        throw 'SubDepartment not found';
-      }
+      final row = (await _rows()).where((r) => Js.s(r['uid']) == uid);
+      if (row.isEmpty) throw 'Sub department not found';
+      return ApiMappers.subDepartment(row.first);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error getting subDepartment: $e';
+      _fail('Error getting sub department', e, st);
     }
   }
 
   static Future<List<SubDepartmentModel>> getAllSubDepartments() async {
     try {
-      var cid = await Spdb.getCid();
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.subDepartments.name)
-          .get();
-
-      List<SubDepartmentModel> subDepartments = querySnapshot.docs.map((doc) {
-        return SubDepartmentModel.fromMap(doc.id, doc.data());
-      }).toList();
-
-      return subDepartments;
+      return (await _rows()).map(ApiMappers.subDepartment).toList();
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error fetching sub departments: $e';
+      _fail('Error fetching subdepartments', e, st);
     }
   }
 
   static Future<List<SubDepartmentModel>> getSubDepartmentsByDepId({
     required String depId,
   }) async {
-    try {
-      var cid = await Spdb.getCid();
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.subDepartments.name)
-          .where('department', isEqualTo: depId)
-          .get();
-
-      List<SubDepartmentModel> subDepartments = querySnapshot.docs.map((doc) {
-        return SubDepartmentModel.fromMap(doc.id, doc.data());
-      }).toList();
-
-      return subDepartments;
-    } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error fetching sub departments: $e';
-    }
+    final all = await getAllSubDepartments();
+    return all.where((s) => s.department == depId).toList();
   }
 
-  /// Returns a user-facing message if this sub department cannot be
-  /// deleted (currently mapped to one or more employees), or null if
-  /// it is safe to delete. Call this before showing a delete
-  /// confirmation so the user only sees "are you sure?" when the
-  /// delete can actually succeed.
+  /// Returns a user-facing message if this sub department cannot be deleted
+  /// (still assigned to an employee), otherwise null.
   static Future<String?> getSubDepartmentDeletionBlocker(String uid) async {
     try {
       if (uid.isEmpty) return null;
-
-      var cid = await Spdb.getCid();
-      var employeeAssignedDocs = await firebase.users
-          .doc(cid)
-          .collection(Collections.employees.name)
-          .where('subDepartment', isEqualTo: uid)
-          .limit(1)
-          .get();
-
-      if (employeeAssignedDocs.docs.isNotEmpty) {
+      await ApiLookup.ensure();
+      final id = ApiLookup.idOf(ApiLookup.kSubDepartment, uid);
+      if (id == null) return null;
+      final emps = (await EmployeesApiService.list()).ensureSuccess().dataList.map(Js.m);
+      if (emps.any((e) => Js.i(e['sub_department_id']) == id)) {
         return 'This sub department is already mapped to an employee. Please reassign or update that employee before deleting this sub department.';
       }
-
       return null;
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
+      ErrorService.recordError(e, st);
       return null;
     }
   }
@@ -152,60 +89,20 @@ class SubDepartmentService {
   static Future<void> deleteSubDepartment({required String uid}) async {
     try {
       final blocker = await getSubDepartmentDeletionBlocker(uid);
-      if (blocker != null) {
-        throw blocker;
-      }
-
-      var cid = await Spdb.getCid();
-
-      var docRef = await firebase.users
-          .doc(cid)
-          .collection(Collections.subDepartments.name)
-          .doc(uid)
-          .get();
-      final data = docRef.data() as Map<String, dynamic>;
-      await TrashService.moveToTrash(
-        docRef: docRef.reference,
-        docData: data,
-        reason: 'user_deleted',
-      );
-      docRef.reference.delete();
-      var user = await Spdb.getUser();
-      ActivityLogModel activityLogModel = ActivityLogModel(
-        userData: user,
-        activity: '${data['name'].toString().decrypt} has been deleted',
-        description:
-            'User has deleted an entry in ${Collections.subDepartments.name}',
-        collection:
-            '${Collections.users.name}/$cid/${Collections.subDepartments.name}',
-        docId: docRef.id,
-      );
-      await CommonService.add(
-        '${Collections.users.name}/$cid/${Collections.activityLogs.name}',
-        activityLogModel.toMap(),
-      );
+      if (blocker != null) throw blocker;
+      (await MastersApiService.delete(_type, uid)).ensureSuccess();
+      ApiLookup.invalidate();
+      ApiLive.changed(_type);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
+      ErrorService.recordError(e, st);
+      if (e is ApiException) throw e.message;
       throw e.toString();
     }
   }
 
-  static Future<void> restoreSubDepartment(
-    SubDepartmentModel subDepartment,
-  ) async {
-    var cid = await Spdb.getCid();
-
-    final uid = subDepartment.uid;
-    if (uid == null || uid.isEmpty) {
-      throw Exception("UID missing");
-    }
-
-    await firebase.users
-        .doc(cid)
-        .collection(Collections.subDepartments.name)
-        .doc(uid)
-        .set(subDepartment.toMap());
+  /// Trash restore is not exposed by masters.php (see MISSING_API_REQUIREMENTS.md).
+  static Future<void> restoreSubDepartment(SubDepartmentModel subDepartment) async {
+    throw 'Restoring a deleted sub department is not supported by the server yet.';
   }
 
   static Future<String> getSubDepartmentByNameOrCreateSubDepartment({
@@ -213,36 +110,22 @@ class SubDepartmentService {
     String? department,
   }) async {
     try {
-      var cid = await Spdb.getCid();
-
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.subDepartments.name)
-          .get();
-
-      for (var doc in querySnapshot.docs) {
-        var data = doc.data();
-        if (data['name'].toString().decrypt.toLowerCase() ==
-            name.toLowerCase()) {
-          return doc.id;
+      final rows = await _rows();
+      for (final r in rows) {
+        if (Js.s(r['name']).trim().toLowerCase() == name.trim().toLowerCase() && (department == null || Js.s(r['department_uid']) == department)) {
+          return Js.s(r['uid']);
         }
       }
-
-      var subDepartment = SubDepartmentModel(
-        name: name,
-        department: department ?? '',
-        description: '',
-        createdBy: await Spdb.getUser(),
-      );
-      var newDoc = await firebase.users
-          .doc(cid)
-          .collection(Collections.subDepartments.name)
-          .add(subDepartment.toMap());
-
-      return newDoc.id;
+      final res = (await MastersApiService.create(_type, {
+        'name': name,
+        'description': '', 'department': department,
+      })).ensureSuccess();
+      ApiLookup.invalidate();
+      ApiLive.changed(_type);
+      return Js.s(res.dataMap['uid']);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
+      ErrorService.recordError(e, st);
+      if (e is ApiException) throw e.message;
       throw e.toString();
     }
   }
@@ -252,26 +135,15 @@ class SubDepartmentService {
     String? excludeUid,
   }) async {
     try {
-      var cid = await Spdb.getCid();
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.subDepartments.name)
-          .get();
-
-      for (var doc in querySnapshot.docs) {
-        if (excludeUid != null && doc.id == excludeUid) continue;
-        
-        var data = doc.data();
-        if (data['name'] != null && 
-            data['name'].toString().decrypt.trim().toLowerCase() ==
-                name.trim().toLowerCase()) {
-          return 'Sub Department name already exists';
+      for (final r in await _rows()) {
+        if (excludeUid != null && Js.s(r['uid']) == excludeUid) continue;
+        if (Js.s(r['name']).trim().toLowerCase() == name.trim().toLowerCase()) {
+          return 'Sub department name already exists';
         }
       }
       return null;
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
+      ErrorService.recordError(e, st);
       return 'Error checking sub department existence: $e';
     }
   }

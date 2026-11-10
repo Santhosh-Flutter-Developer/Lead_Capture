@@ -1,41 +1,29 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import '/services/services.dart';
-import '/constants/constants.dart';
 import '/models/models.dart';
 part 'designation_event.dart';
 part 'designation_state.dart';
 
 class DesignationBloc extends Bloc<DesignationEvent, DesignationState> {
-  FirebaseFirestore firestore = FirebaseFirestore.instance;
   List<DesignationModel> allDesignations = [];
 
   DesignationBloc() : super(DesignationLoading()) {
-    on<StreamDesignation>(_streamDesignations);
+    on<StreamDesignation>(_stream);
   }
 
-  Future<void> _streamDesignations(
-      StreamDesignation event, Emitter<DesignationState> emit) async {
+  /// PHP API has no realtime channel: data is re-fetched after every write
+  /// (ApiLive.changed) and polled every 30s for changes by other users.
+  Future<void> _stream(StreamDesignation event, Emitter<DesignationState> emit) async {
     emit(DesignationLoading());
-    var cid = await Spdb.getCid();
-    await emit.forEach(
-      firestore
-          .collection(Collections.users.name)
-          .doc(cid)
-          .collection(Collections.designations.name)
-          .snapshots()
-          .map((snapshot) {
-        allDesignations = snapshot.docs
-            .map((doc) => DesignationModel.fromMap(doc.id, doc.data()))
-            .toList();
-
+    await emit.forEach<List<DesignationModel>>(
+      ApiLive.watch({'designation'}, () async {
+        allDesignations = await DesignationService.getAllDesignations();
         return allDesignations;
       }),
-      onData: (designations) => DesignationLoaded(designations),
-      onError: (error, stackTrace) {
-        return DesignationError("Failed to load designation, $error");
-      },
+      onData: (items) => DesignationLoaded(items),
+      onError: (error, stackTrace) =>
+          DesignationError("Failed to load designation, $error"),
     );
   }
 }

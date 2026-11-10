@@ -1,27 +1,31 @@
 import 'package:flutter/material.dart';
-import '/constants/constants.dart';
 import '/utils/utils.dart';
 import '/models/models.dart';
 import '/services/services.dart';
 
+/// Designation master – backed by masters.php?type=designation (no Firestore).
 class DesignationService {
-  static final FirebaseConfig firebase = FirebaseConfig();
+  static const String _type = MasterTypes.designation;
 
-  static Future<void> createDesignation({
-    required DesignationModel designation,
-  }) async {
+  static Future<List<Map<String, dynamic>>> _rows() async {
+    final res = (await MastersApiService.list(_type)).ensureSuccess();
+    return res.dataList.map(Js.m).toList();
+  }
+
+  static Never _fail(String prefix, Object e, StackTrace st) {
+    ErrorService.recordError(e, st);
+    debugPrint("$e, $st");
+    if (e is ApiException) throw e.message;
+    throw '$prefix: $e';
+  }
+
+  static Future<void> createDesignation({required DesignationModel designation}) async {
     try {
-      var cid = await Spdb.getCid();
-
-      await CommonService.add(
-        '${Collections.users.name}/$cid/${Collections.designations.name}',
-        designation.toMap(),
-        activity: '${designation.name} has been added as a designation',
-      );
+      (await MastersApiService.create(_type, {'name': designation.name, 'description': designation.description})).ensureSuccess();
+      ApiLookup.invalidate();
+      ApiLive.changed(_type);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error creating designation: $e';
+      _fail('Error creating designation', e, st);
     }
   }
 
@@ -30,96 +34,47 @@ class DesignationService {
     required DesignationModel designation,
   }) async {
     try {
-      var cid = await Spdb.getCid();
-
-      await CommonService.update(
-        '${Collections.users.name}/$cid/${Collections.designations.name}',
-        uid,
-        designation.toUpdateMap(),
-        activity: '${designation.name} has been updated',
-      );
+      (await MastersApiService.update(_type, uid, {'name': designation.name, 'description': designation.description})).ensureSuccess();
+      ApiLookup.invalidate();
+      ApiLive.changed(_type);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error updating designation: $e';
+      _fail('Error updating designation', e, st);
     }
   }
 
   static Future<DesignationModel> getDesignation({required String uid}) async {
     try {
-      var cid = await Spdb.getCid();
-      var designationDoc = await firebase.users
-          .doc(cid)
-          .collection(Collections.designations.name)
-          .doc(uid)
-          .get();
-
-      if (designationDoc.exists) {
-        var designationData = designationDoc.data();
-        if (designationData != null) {
-          var designation = DesignationModel.fromMap(
-            designationDoc.id,
-            designationData,
-          );
-          return designation;
-        } else {
-          throw 'Designation data is empty';
-        }
-      } else {
-        throw 'Designation not found';
-      }
+      final row = (await _rows()).where((r) => Js.s(r['uid']) == uid);
+      if (row.isEmpty) throw 'Designation not found';
+      return ApiMappers.designation(row.first);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error creating designation: $e';
+      _fail('Error getting designation', e, st);
     }
   }
 
   static Future<List<DesignationModel>> getAllDesignations() async {
     try {
-      var cid = await Spdb.getCid();
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.designations.name)
-          .get();
-
-      List<DesignationModel> designations = querySnapshot.docs.map((doc) {
-        return DesignationModel.fromMap(doc.id, doc.data());
-      }).toList();
-
-      return designations;
+      return (await _rows()).map(ApiMappers.designation).toList();
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error fetching designations: $e';
+      _fail('Error fetching designations', e, st);
     }
   }
 
-  /// Returns a user-facing message if this designation cannot be
-  /// deleted (currently mapped to one or more employees), or null if
-  /// it is safe to delete. Call this before showing a delete
-  /// confirmation so the user only sees "are you sure?" when the
-  /// delete can actually succeed.
+  /// Returns a user-facing message if this designation cannot be deleted
+  /// (still assigned to an employee), otherwise null.
   static Future<String?> getDesignationDeletionBlocker(String uid) async {
     try {
       if (uid.isEmpty) return null;
-
-      var cid = await Spdb.getCid();
-      var employeeAssignedDocs = await firebase.users
-          .doc(cid)
-          .collection(Collections.employees.name)
-          .where('designation', isEqualTo: uid)
-          .limit(1)
-          .get();
-
-      if (employeeAssignedDocs.docs.isNotEmpty) {
+      await ApiLookup.ensure();
+      final id = ApiLookup.idOf(ApiLookup.kDesignation, uid);
+      if (id == null) return null;
+      final emps = (await EmployeesApiService.list()).ensureSuccess().dataList.map(Js.m);
+      if (emps.any((e) => Js.i(e['designation_id']) == id)) {
         return 'This designation is already mapped to an employee. Please reassign or update that employee before deleting this designation.';
       }
-
       return null;
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
+      ErrorService.recordError(e, st);
       return null;
     }
   }
@@ -127,94 +82,42 @@ class DesignationService {
   static Future<void> deleteDesignation({required String uid}) async {
     try {
       final blocker = await getDesignationDeletionBlocker(uid);
-      if (blocker != null) {
-        throw blocker;
-      }
-
-      var cid = await Spdb.getCid();
-
-      var docRef = await firebase.users
-          .doc(cid)
-          .collection(Collections.designations.name)
-          .doc(uid)
-          .get();
-      final data = docRef.data() as Map<String, dynamic>;
-      await TrashService.moveToTrash(
-        docRef: docRef.reference,
-        docData: data,
-        reason: 'user_deleted',
-      );
-      docRef.reference.delete();
-      var user = await Spdb.getUser();
-      ActivityLogModel activityLogModel = ActivityLogModel(
-        userData: user,
-        activity: '${data['name'].toString().decrypt} has been deleted',
-        description:
-            'User has deleted an entry in ${Collections.designations.name}',
-        collection:
-            '${Collections.users.name}/$cid/${Collections.designations.name}',
-        docId: docRef.id,
-      );
-      await CommonService.add(
-        '${Collections.users.name}/$cid/${Collections.activityLogs.name}',
-        activityLogModel.toMap(),
-      );
+      if (blocker != null) throw blocker;
+      (await MastersApiService.delete(_type, uid)).ensureSuccess();
+      ApiLookup.invalidate();
+      ApiLive.changed(_type);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
+      ErrorService.recordError(e, st);
+      if (e is ApiException) throw e.message;
       throw e.toString();
     }
   }
 
+  /// Trash restore is not exposed by masters.php (see MISSING_API_REQUIREMENTS.md).
   static Future<void> restoreDesignation(DesignationModel designation) async {
-    var cid = await Spdb.getCid();
-
-    final uid = designation.uid;
-    if (uid == null || uid.isEmpty) {
-      throw Exception("UID missing");
-    }
-
-    await firebase.users
-        .doc(cid)
-        .collection(Collections.designations.name)
-        .doc(uid)
-        .set(designation.toMap());
+    throw 'Restoring a deleted designation is not supported by the server yet.';
   }
 
   static Future<String> getDesignationByNameOrCreateDesignation({
     required String name,
   }) async {
     try {
-      var cid = await Spdb.getCid();
-
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.designations.name)
-          .get();
-
-      for (var doc in querySnapshot.docs) {
-        var data = doc.data();
-        if (data['name'].toString().decrypt.toLowerCase() ==
-            name.toLowerCase()) {
-          return doc.id;
+      final rows = await _rows();
+      for (final r in rows) {
+        if (Js.s(r['name']).trim().toLowerCase() == name.trim().toLowerCase()) {
+          return Js.s(r['uid']);
         }
       }
-
-      var designation = DesignationModel(
-        name: name,
-        description: '',
-        createdBy: await Spdb.getUser(),
-      );
-      var newDoc = await CommonService.add(
-        '${Collections.users.name}/$cid/${Collections.designations.name}',
-        designation.toMap(),
-        activity: '${designation.name} has been added as a designation',
-      );
-
-      return newDoc.id;
+      final res = (await MastersApiService.create(_type, {
+        'name': name,
+        'description': '',
+      })).ensureSuccess();
+      ApiLookup.invalidate();
+      ApiLive.changed(_type);
+      return Js.s(res.dataMap['uid']);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
+      ErrorService.recordError(e, st);
+      if (e is ApiException) throw e.message;
       throw e.toString();
     }
   }
@@ -224,26 +127,15 @@ class DesignationService {
     String? excludeUid,
   }) async {
     try {
-      var cid = await Spdb.getCid();
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.designations.name)
-          .get();
-
-      for (var doc in querySnapshot.docs) {
-        if (excludeUid != null && doc.id == excludeUid) continue;
-        
-        var data = doc.data();
-        if (data['name'] != null && 
-            data['name'].toString().decrypt.trim().toLowerCase() ==
-                name.trim().toLowerCase()) {
+      for (final r in await _rows()) {
+        if (excludeUid != null && Js.s(r['uid']) == excludeUid) continue;
+        if (Js.s(r['name']).trim().toLowerCase() == name.trim().toLowerCase()) {
           return 'Designation name already exists';
         }
       }
       return null;
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
+      ErrorService.recordError(e, st);
       return 'Error checking designation existence: $e';
     }
   }

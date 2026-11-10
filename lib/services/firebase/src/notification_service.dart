@@ -18,7 +18,6 @@ import 'dart:convert';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:iconsax/iconsax.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -723,17 +722,12 @@ class NotificationService {
   }
 }
 
-// ─── Firestore helpers (platform-agnostic) ───────────────────────────────────
+// ─── notifications.php helpers (platform-agnostic) ───────────────────────────
 
 Future<void> deleteNotification(String uid) async {
   try {
-    final FirebaseConfig firebase = FirebaseConfig();
-    var cid = await Spdb.getCid();
-    await firebase.users
-        .doc(cid)
-        .collection(Collections.notifications.name)
-        .doc(uid)
-        .delete();
+    (await NotificationsApiService.call('delete', {'uid': uid})).ensureSuccess();
+    ApiLive.changed('notifications');
   } catch (e, st) {
     await ErrorService.recordError(e, st);
     throw e.toString();
@@ -742,86 +736,30 @@ Future<void> deleteNotification(String uid) async {
 
 Future<void> restoreNotification(NotificationModel item) async {
   try {
-    final FirebaseConfig firebase = FirebaseConfig();
-    final cid = await Spdb.getCid();
-    await firebase.users
-        .doc(cid)
-        .collection(Collections.notifications.name)
-        .doc(item.uid)
-        .set(item.toMap());
+    (await NotificationsApiService.call('restore', {'uid': item.uid})).ensureSuccess();
+    ApiLive.changed('notifications');
   } catch (e, st) {
     await ErrorService.recordError(e, st);
   }
 }
 
-/// Live count of UNREAD notifications for the logged-in user.
-///
-/// A notification is unread when:
-///   • the user is a recipient (`toUids` contains uid),
-///   • the user did not send it themselves, and
-///   • the user's uid is not yet in its `readBy` list.
-///
-/// The filtering is done client-side so that old documents (which have no
-/// `readBy` field) still work, and so no extra Firestore index is needed.
-Stream<int> getNotificationCount() async* {
-  try {
-    final firebase = FirebaseConfig();
-    final cid = await Spdb.getCid();
-    final uid = await Spdb.getUid();
-    if (uid == null || uid.isEmpty) {
-      yield 0;
-      return;
-    }
-    yield* firebase.users
-        .doc(cid)
-        .collection(Collections.notifications.name)
-        .where('toUids', arrayContains: uid)
-        .snapshots()
-        .map((snapshot) {
-          return snapshot.docs.where((doc) {
-            final data = doc.data();
-            if (data['senderId'] == uid) return false;
-            final readBy = data['readBy'] is List
-                ? List<String>.from(data['readBy'])
-                : const <String>[];
-            return !readBy.contains(uid);
-          }).length;
-        });
-  } catch (e, st) {
-    ErrorService.recordError(e, st);
-    rethrow;
-  }
+/// Unread count for the logged-in user (notifications.php `unread_count`),
+/// refreshed after every change and polled every 30 s.
+Stream<int> getNotificationCount() {
+  return ApiLive.watch<int>({'notifications'}, () async {
+    final res = (await NotificationsApiService.call('list')).ensureSuccess();
+    return Js.i(res.dataMap['unread_count']) ?? 0;
+  });
 }
 
-/// Marks the given notifications as read for the logged-in user.
-/// Uses `arrayUnion`, so it is safe for notifications shared by many users
-/// (each user only adds their own uid) and is idempotent.
+/// Marks notifications as read (notifications.php mark_read, per id).
 Future<void> markNotificationsAsRead(List<String> notificationIds) async {
   if (notificationIds.isEmpty) return;
   try {
-    final firebase = FirebaseConfig();
-    final cid = await Spdb.getCid();
-    final uid = await Spdb.getUid();
-    if (uid == null || uid.isEmpty) return;
-
-    final col = firebase.users
-        .doc(cid)
-        .collection(Collections.notifications.name);
-
-    // Firestore batches are limited to 500 writes.
-    for (var i = 0; i < notificationIds.length; i += 450) {
-      final chunk = notificationIds.sublist(
-        i,
-        i + 450 > notificationIds.length ? notificationIds.length : i + 450,
-      );
-      final batch = FirebaseFirestore.instance.batch();
-      for (final id in chunk) {
-        batch.update(col.doc(id), {
-          'readBy': FieldValue.arrayUnion([uid]),
-        });
-      }
-      await batch.commit();
+    for (final id in notificationIds) {
+      await NotificationsApiService.call('mark_read', {'uid': id});
     }
+    ApiLive.changed('notifications');
   } catch (e, st) {
     await ErrorService.recordError(e, st);
   }

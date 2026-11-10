@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import '/models/src/timestamp.dart';
 
 class DownloadHistoryModel {
   final String fileName;
@@ -25,7 +25,7 @@ class DownloadHistoryModel {
       filePath: map['filePath'] ?? '',
       url: map['url'] ?? '',
       fileSize: map['fileSize'] ?? 0,
-      downloadedAt: (map['downloadedAt'] as Timestamp).toDate(),
+      downloadedAt: anyToDate(map['downloadedAt']),
       isSuccess: map['isSuccess'] ?? true,
       userId: map['userId'] ?? '',
     );
@@ -37,7 +37,7 @@ class DownloadHistoryModel {
       'filePath': filePath,
       'url': url,
       'fileSize': fileSize,
-      'downloadedAt': Timestamp.fromDate(downloadedAt),
+      'downloadedAt': downloadedAt.millisecondsSinceEpoch,
       'isSuccess': isSuccess,
       'userId': userId,
     };

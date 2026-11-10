@@ -1,10 +1,8 @@
 import 'dart:developer';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
-import 'package:rxdart/rxdart.dart';
 import '/services/services.dart';
 import '/constants/constants.dart';
 import '/models/models.dart';
@@ -12,7 +10,6 @@ part 'employee_event.dart';
 part 'employee_state.dart';
 
 class EmployeeBloc extends Bloc<EmployeeEvent, EmployeeState> {
-  FirebaseFirestore firestore = FirebaseFirestore.instance;
   List<EmployeeModel> allEmployees = [];
 
   EmployeeBloc() : super(EmployeeLoading()) {
@@ -25,21 +22,13 @@ class EmployeeBloc extends Bloc<EmployeeEvent, EmployeeState> {
     Emitter<EmployeeState> emit,
   ) async {
     emit(EmployeeLoading());
-    var cid = await Spdb.getCid();
-
-    await emit.forEach(
-      firestore
-          .collection(Collections.users.name)
-          .doc(cid)
-          .collection(Collections.employees.name)
-          .snapshots()
-          .map((snapshot) {
-            allEmployees = snapshot.docs
-                .map((doc) => EmployeeModel.fromMap(doc.id, doc.data()))
-                .toList();
-
-            return allEmployees;
-          }),
+    await emit.forEach<List<EmployeeModel>>(
+      ApiLive.watch({'employee', 'role', 'designation', 'department', 'sub_department'}, () async {
+        await ApiLookup.ensure();
+        final res = (await EmployeesApiService.list(userType: 'employee')).ensureSuccess();
+        allEmployees = res.dataList.map((e) => ApiMappers.employee(Js.m(e))).toList();
+        return allEmployees;
+      }),
       onData: (employees) => EmployeeLoaded(employees),
       onError: (error, stackTrace) {
         log(stackTrace.toString());
@@ -54,7 +43,7 @@ class EmployeeBloc extends Bloc<EmployeeEvent, EmployeeState> {
 ) async {
   try {
     await EmployeeService.deleteEmployee(uid: event.uid);
-    // Firestore stream will auto-update the list
+    // Re-fetched automatically via ApiLive
   } catch (e, st) {
     await ErrorService.recordError(e, st);
     debugPrint('Delete employee failed: $e');
@@ -79,8 +68,6 @@ class EmployeeBloc extends Bloc<EmployeeEvent, EmployeeState> {
 }
 
 class UsersBloc extends Bloc<UsersEvent, UsersState> {
-  final FirebaseFirestore firestore = FirebaseFirestore.instance;
-
   UsersBloc() : super(UsersLoading()) {
     on<StreamUsers>(_streamUsers);
       on<DeleteUser>(_onDeleteUser);
@@ -93,44 +80,15 @@ class UsersBloc extends Bloc<UsersEvent, UsersState> {
     emit(UsersLoading());
 
     try {
-      final cid = await Spdb.getCid();
-
-      final employeeStream = firestore
-          .collection(Collections.users.name)
-          .doc(cid)
-          .collection(Collections.employees.name)
-          .snapshots()
-          .map(
-            (snapshot) => snapshot.docs
-                .map(
-                  (doc) => EmployeeModel.fromMap(doc.id, doc.data())
-                      .toUserRowModel(),
-                )
-                .toList(),
-          );
-
-      final adminStream = firestore
-          .collection(Collections.users.name)
-          .doc(cid)
-          .collection(Collections.admins.name)
-          .snapshots()
-          .map(
-            (snapshot) => snapshot.docs
-                .map(
-                  (doc) =>
-                      AdminModel.fromMap(doc.id, doc.data()).toUserRowModel(),
-                )
-                .toList(),
-          );
-
       await emit.forEach<List<UserRowModel>>(
-        Rx.combineLatest2(
-          employeeStream,
-          adminStream,
-          (List<UserRowModel> employees, List<UserRowModel> admins) {
-            return [...admins, ...employees];
-          },
-        ),
+        ApiLive.watch({'employee', 'admin', 'role', 'designation', 'department', 'sub_department'}, () async {
+          await ApiLookup.ensure();
+          final res = (await EmployeesApiService.list()).ensureSuccess();
+          final rows = res.dataList.map(Js.m).toList();
+          final admins = rows.where(ApiMappers.isAdminRow).map((r) => ApiMappers.admin(r).toUserRowModel());
+          final emps = rows.where((r) => !ApiMappers.isAdminRow(r)).map((r) => ApiMappers.employee(r).toUserRowModel());
+          return [...admins, ...emps];
+        }),
         onData: (users) => UsersLoaded(users),
         onError: (e, _) => UsersError("Failed to load users: $e"),
       );
@@ -144,7 +102,6 @@ class UsersBloc extends Bloc<UsersEvent, UsersState> {
     Emitter<UsersState> emit,
   ) async {
     try {
-      // 🔥 FIREBASE DELETE
       if (event.user.userType == UserType.employee) {
         await EmployeeService.deleteEmployee(uid: event.user.uid);
       } else {

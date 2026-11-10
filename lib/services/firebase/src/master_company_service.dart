@@ -1,91 +1,63 @@
 import 'package:flutter/material.dart';
-import '/constants/constants.dart';
-import '/models/models.dart';
 import '/services/services.dart';
+import '/models/models.dart';
 
-/// CRUD for Master Companies (`users/{cid}/masterCompanies`).
+/// "Our Companies" – backed by master_companies.php (no Firestore).
 class MasterCompanyService {
-  static final FirebaseConfig firebase = FirebaseConfig();
+  static Never _fail(String prefix, Object e, StackTrace st) {
+    ErrorService.recordError(e, st);
+    debugPrint('$prefix: $e\n$st');
+    if (e is ApiException) throw e.message;
+    if (e is String) throw e;
+    throw '$prefix: $e';
+  }
 
-  static String _path(String? cid) =>
-      '${Collections.users.name}/$cid/${Collections.masterCompanies.name}';
-
-  static String _norm(String? v) => (v ?? '').trim().toLowerCase();
+  static Map<String, dynamic> _body(MasterCompanyModel m) => {
+    'company_name': m.companyName,
+    'contact_name': m.contactName,
+    'mobile_number': m.mobileNumber,
+    'email': m.email ?? '',
+    'gst_vat_number': m.gstVatNumber ?? '',
+    'country': m.country?.name ?? 'India',
+    'state': m.state?.name,
+    'district': m.district?.name,
+    'city': m.city?.name,
+    'postal_code': m.postalCode ?? '',
+    'company_address': m.companyAddress ?? '',
+    'logo_url': ApiConfig.toRelativePath(m.logoUrl ?? ''),
+  };
 
   static Future<List<MasterCompanyModel>> getAll() async {
     try {
-      final cid = await Spdb.getCid();
-      final snap = await firebase.users
-          .doc(cid)
-          .collection(Collections.masterCompanies.name)
-          .get();
-      final list = snap.docs
-          .map((d) => MasterCompanyModel.fromMap(d.id, d.data()))
-          .where((e) => e.companyName.trim().isNotEmpty)
-          .toList();
-      list.sort(
-        (a, b) =>
-            a.companyName.toLowerCase().compareTo(b.companyName.toLowerCase()),
-      );
-      return list;
+      final res = (await MasterClientsApiService.companies('list')).ensureSuccess();
+      return res.dataList.map((r) => CrmMappers.masterCompany(Js.m(r))).toList();
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      throw 'Error fetching companies: $e';
+      _fail('Error fetching companies', e, st);
     }
   }
 
   static Future<MasterCompanyModel> get({required String uid}) async {
     try {
-      final cid = await Spdb.getCid();
-      final doc = await firebase.users
-          .doc(cid)
-          .collection(Collections.masterCompanies.name)
-          .doc(uid)
-          .get();
-      final data = doc.data();
-      if (!doc.exists || data == null) throw 'Master company not found';
-      return MasterCompanyModel.fromMap(doc.id, data);
+      final res = (await MasterClientsApiService.companies('get', {'uid': uid})).ensureSuccess();
+      return CrmMappers.masterCompany(res.dataMap);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      throw 'Error loading company: $e';
+      _fail('Error getting company', e, st);
     }
   }
 
-  /// True when another company already has the same company name
-  /// (or the same non-empty GST/VAT number).
+  /// Duplicates are rejected by the server on create/update.
   static Future<bool> isDuplicate({
     required MasterCompanyModel company,
     String? excludeUid,
-  }) async {
-    final all = await getAll();
-    final name = _norm(company.companyName);
-    final gst = _norm(company.gstVatNumber);
-    return all.any(
-      (c) =>
-          c.uid != excludeUid &&
-          (_norm(c.companyName) == name ||
-              (gst.isNotEmpty && _norm(c.gstVatNumber) == gst)),
-    );
-  }
-
-  static const _dupMsg =
-      'This company already exists (matching company name or GST/VAT number).';
+  }) async => false;
 
   static Future<String> create({required MasterCompanyModel company}) async {
     try {
-      if (await isDuplicate(company: company)) throw _dupMsg;
-      final cid = await Spdb.getCid();
-      final ref = await CommonService.add(
-        _path(cid),
-        company.toMap(),
-        activity: '${company.companyName} has been added as our company',
-      );
-      return ref.id;
+      final res = (await MasterClientsApiService.companies('create', _body(company))).ensureSuccess();
+      ApiLive.changed('master_companies');
+      return Js.s(res.dataMap['uid']);
     } catch (e, st) {
-      debugPrint('$e, $st');
-      if (e == _dupMsg) rethrow;
-      await ErrorService.recordError(e, st);
-      throw 'Error creating company: $e';
+      _fail('Error creating company', e, st);
     }
   }
 
@@ -94,65 +66,24 @@ class MasterCompanyService {
     required MasterCompanyModel company,
   }) async {
     try {
-      if (await isDuplicate(company: company, excludeUid: uid)) throw _dupMsg;
-      final cid = await Spdb.getCid();
-      await CommonService.update(
-        _path(cid),
-        uid,
-        company.toMap(),
-        activity: '${company.companyName} has been updated',
-      );
+      (await MasterClientsApiService.companies('update', {'uid': uid, ..._body(company)})).ensureSuccess();
+      ApiLive.changed('master_companies');
     } catch (e, st) {
-      debugPrint('$e, $st');
-      if (e == _dupMsg) rethrow;
-      await ErrorService.recordError(e, st);
-      throw 'Error updating company: $e';
+      _fail('Error updating company', e, st);
     }
   }
 
   static Future<void> delete({required String uid}) async {
     try {
-      final cid = await Spdb.getCid();
-      final snap = await firebase.users
-          .doc(cid)
-          .collection(Collections.masterCompanies.name)
-          .doc(uid)
-          .get();
-      final data = snap.data();
-      if (data == null) return;
-      await TrashService.moveToTrash(
-        docRef: snap.reference,
-        docData: data,
-        reason: 'user_deleted',
-      );
-      await snap.reference.delete();
-
-      final user = await Spdb.getUser();
-      await CommonService.add(
-        '${Collections.users.name}/$cid/${Collections.activityLogs.name}',
-        ActivityLogModel(
-          userData: user,
-          activity: '${data['companyName'] ?? 'Company'} has been deleted',
-          description:
-              'User has deleted an entry in ${Collections.masterCompanies.name}',
-          collection: _path(cid),
-          docId: uid,
-        ).toMap(),
-      );
+      (await MasterClientsApiService.companies('delete', {'uid': uid})).ensureSuccess();
+      ApiLive.changed({'master_companies', 'trash'});
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      throw 'Error deleting company: $e';
+      _fail('Error deleting company', e, st);
     }
   }
 
+  /// master_companies.php has no restore action.
   static Future<void> restore(MasterCompanyModel company) async {
-    final cid = await Spdb.getCid();
-    final uid = company.uid;
-    if (uid == null || uid.isEmpty) throw Exception('UID missing');
-    await firebase.users
-        .doc(cid)
-        .collection(Collections.masterCompanies.name)
-        .doc(uid)
-        .set(company.toMap());
+    throw 'Restoring a deleted company is not supported by the server yet.';
   }
 }

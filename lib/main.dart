@@ -8,7 +8,6 @@
 //   • LifecycleHandler guarded behind !kIsWeb (AppLifecycle API is
 //     not fully supported on web)
 // ─────────────────────────────────────────────────────────────────────────────
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -66,12 +65,8 @@ void main() async {
   // selection toolbar (Copy / Select all), which the browser menu cannot
   // offer for canvas-rendered text.
   if (kIsWeb) BrowserContextMenu.disableContextMenu();
+  // Firebase is kept ONLY for push notifications (FCM); all data uses the PHP API.
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-
-  FirebaseFirestore.instance.settings = const Settings(
-    persistenceEnabled: true,
-    cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
-  );
 
   if (kIsWeb) {
     // ── Web: use Firebase Messaging web push (VAPID) ──────────────────────

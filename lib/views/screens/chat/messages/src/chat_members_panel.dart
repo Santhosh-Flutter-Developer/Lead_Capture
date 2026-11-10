@@ -154,14 +154,8 @@ class _ChatMembersPanelState extends State<ChatMembersPanel> {
       String? chatId = await ChatService.getChatUid(m.uid);
       chatId ??= await ChatService.createIndividualChat(userId: m.uid);
 
-      final doc = await FirebaseFirestore.instance
-          .collection(Collections.users.name)
-          .doc(cid)
-          .collection(Collections.chats.name)
-          .doc(chatId)
-          .get();
-      if (!doc.exists) return;
-      final chat = ChatModel.fromMap(doc.id, doc.data()!);
+      final chat = await ChatService.getChat(uid: chatId);
+      if (chat == null) return;
 
       if (widget.isSheet) {
         // Mobile: close the sheet, then open the person's chat screen.

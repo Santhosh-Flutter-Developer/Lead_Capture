@@ -2,7 +2,6 @@ import 'dart:io' show File;
 import 'dart:typed_data';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_exif_rotation/flutter_exif_rotation.dart';
@@ -179,15 +178,10 @@ class _ProfileState extends State<Profile> {
         setState(() => admin = updatedAdmin);
       } else {
         String uid = employee!.uid!;
-        final storageRef = FirebaseStorage.instance.ref().child(
-          "profile_images/profile_$uid.jpg",
+        downloadUrl = await xFileToUploadUrl(
+          imageFile,
+          StorageFolder.userPhotos,
         );
-        if (kIsWeb) {
-          await storageRef.putData(await imageFile.readAsBytes());
-        } else {
-          await storageRef.putFile(File(imageFile.path));
-        }
-        downloadUrl = await storageRef.getDownloadURL();
         final updatedEmployee = employee!.copyWith(
           profileImageUrl: downloadUrl,
           updatedAt: DateTime.now(),

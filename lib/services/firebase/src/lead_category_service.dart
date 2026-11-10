@@ -1,27 +1,32 @@
 import 'package:flutter/material.dart';
-import '/constants/constants.dart';
+import '/utils/utils.dart';
 import '/models/models.dart';
 import '/services/services.dart';
-import '/utils/utils.dart';
 
+/// Lead category master – backed by masters.php?type=lead_category (no Firestore).
 class LeadCategoryService {
-  static final FirebaseConfig firebase = FirebaseConfig();
+  static const String _type = MasterTypes.leadCategory;
 
-  static Future<void> createLeadCategory({
-    required LeadCategoryModel leadCategory,
-  }) async {
+  static Future<List<Map<String, dynamic>>> _rows() async {
+    final res = (await MastersApiService.list(_type)).ensureSuccess();
+    return res.dataList.map(Js.m).toList();
+  }
+
+  static Never _fail(Object e, StackTrace st) {
+    ErrorService.recordError(e, st);
+    debugPrint("$e, $st");
+    if (e is ApiException) throw e.message;
+    throw e.toString();
+  }
+
+  static Map<String, dynamic> _body(LeadCategoryModel m) => {'name': m.name, 'description': m.description};
+
+  static Future<void> createLeadCategory({required LeadCategoryModel leadCategory}) async {
     try {
-      var cid = await Spdb.getCid();
-
-      await CommonService.add(
-        '${Collections.users.name}/$cid/${Collections.leadCategory.name}',
-        leadCategory.toMap(),
-        activity: '${leadCategory.name} has been added as a lead category',
-      );
+      (await MastersApiService.create(_type, _body(leadCategory))).ensureSuccess();
+      ApiLive.changed(_type);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error creating leadCategory: $e';
+      _fail(e, st);
     }
   }
 
@@ -30,182 +35,66 @@ class LeadCategoryService {
     required LeadCategoryModel leadCategory,
   }) async {
     try {
-      var cid = await Spdb.getCid();
-
-      await CommonService.update(
-        '${Collections.users.name}/$cid/${Collections.leadCategory.name}',
-        uid,
-        leadCategory.toUpdateMap(),
-        activity: '${leadCategory.name} has been updated',
-      );
+      (await MastersApiService.update(_type, uid, _body(leadCategory))).ensureSuccess();
+      ApiLive.changed(_type);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error updating leadCategory: $e';
+      _fail(e, st);
     }
   }
 
-  static Future<void> restoreLeadCategory(LeadCategoryModel category) async {
-    var cid = await Spdb.getCid();
-
-    final uid = category.uid;
-    if (uid == null || uid.isEmpty) {
-      throw Exception("UID missing");
-    }
-
-    await firebase.users
-        .doc(cid)
-        .collection(Collections.leadCategory.name)
-        .doc(uid)
-        .set(category.toMap());
-  }
-
-  static Future<LeadCategoryModel> getLeadCategory({
-    required String uid,
-  }) async {
+  static Future<LeadCategoryModel> getLeadCategory({required String uid}) async {
     try {
-      var cid = await Spdb.getCid();
-      var leadCategoryDoc = await firebase.users
-          .doc(cid)
-          .collection(Collections.leadCategory.name)
-          .doc(uid)
-          .get();
-
-      if (leadCategoryDoc.exists) {
-        var leadCategoryData = leadCategoryDoc.data();
-        if (leadCategoryData != null) {
-          var leadCategory = LeadCategoryModel.fromMap(
-            leadCategoryDoc.id,
-            leadCategoryData,
-          );
-          return leadCategory;
-        } else {
-          throw 'Lead Source data is empty';
-        }
-      } else {
-        throw 'Lead Source not found';
-      }
+      final r = (await _rows()).where((r) => Js.s(r['uid']) == uid);
+      if (r.isEmpty) throw 'Lead category not found';
+      return ApiMappers.leadCategory(r.first);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error creating leadCategory: $e';
+      _fail(e, st);
     }
   }
 
   static Future<List<LeadCategoryModel>> getAllLeadCategories() async {
     try {
-      var cid = await Spdb.getCid();
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.leadCategory.name)
-          .get();
-
-      List<LeadCategoryModel> leadCategory = querySnapshot.docs.map((doc) {
-        return LeadCategoryModel.fromMap(doc.id, doc.data());
-      }).toList();
-
-      return leadCategory;
+      return (await _rows()).map(ApiMappers.leadCategory).toList();
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error fetching leadCategory: $e';
+      _fail(e, st);
     }
   }
 
-  static Future<bool> isLeadCategoryAssigned(String categoryUid) async {
-    try {
-      var cid = await Spdb.getCid();
-
-      final snapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.leads.name)
-          .where('leadCategory', isEqualTo: categoryUid)
-          .limit(1)
-          .get();
-
-      return snapshot.docs.isNotEmpty;
-    } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("Error checking lead category assignment: $e\n$st");
-      return false;
-    }
-  }
+  /// The server refuses to delete a lead category that is in use and says
+  /// why, so no client-side pre-check is needed (deleteLeadCategory surfaces it).
+  static Future<bool> isLeadCategoryAssigned(String uid) async => false;
 
   static Future<void> deleteLeadCategory({required String uid}) async {
     try {
-      var cid = await Spdb.getCid();
-
-      var docRef = await firebase.users
-          .doc(cid)
-          .collection(Collections.leadCategory.name)
-          .doc(uid)
-          .get();
-
-      final data = docRef.data() as Map<String, dynamic>;
-      await TrashService.moveToTrash(
-        docRef: docRef.reference,
-        docData: data,
-        reason: 'user_deleted',
-      );
-
-      docRef.reference.delete();
-      var user = await Spdb.getUser();
-      ActivityLogModel activityLogModel = ActivityLogModel(
-        userData: user,
-        activity: '${data['name'].toString().decrypt} has been deleted',
-        description:
-            'User has deleted an entry in ${Collections.leadCategory.name}',
-        collection:
-            '${Collections.users.name}/$cid/${Collections.leadCategory.name}',
-        docId: docRef.id,
-      );
-      await CommonService.add(
-        '${Collections.users.name}/$cid/${Collections.activityLogs.name}',
-        activityLogModel.toMap(),
-      );
+      (await MastersApiService.delete(_type, uid)).ensureSuccess();
+      ApiLive.changed(_type);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error deleting lead category: $e';
+      _fail(e, st);
     }
   }
 
-  static Future<LeadCategoryModel> getByNameOrCreate({
-    required String name,
-  }) async {
+  /// Trash restore is not exposed by masters.php (see MISSING_API_REQUIREMENTS.md).
+  static Future<void> restoreLeadCategory(LeadCategoryModel item) async {
+    throw 'Restoring a deleted lead category is not supported by the server yet.';
+  }
+
+  static Future<LeadCategoryModel> getByNameOrCreate({required String name}) async {
     try {
-      var cid = await Spdb.getCid();
-
-      final query = await firebase.users
-          .doc(cid)
-          .collection(Collections.leadCategory.name)
-          .where('name', isEqualTo: name.encrypt)
-          .limit(1)
-          .get();
-
-      if (query.docs.isNotEmpty) {
-        final doc = query.docs.first;
-        return LeadCategoryModel.fromMap(doc.id, doc.data());
+      final n = name.trim().toLowerCase();
+      for (final r in await _rows()) {
+        if (Js.s(r['name']).trim().toLowerCase() == n) return ApiMappers.leadCategory(r);
       }
-
-      final newModel = LeadCategoryModel(
-        name: name,
-        createdBy: await Spdb.getUser(),
-        description: '',
-      );
-
-      final docRef = await firebase.users
-          .doc(cid)
-          .collection(Collections.leadCategory.name)
-          .add(newModel.toMap());
-
-      final createdDoc = await docRef.get();
-
-      return LeadCategoryModel.fromMap(createdDoc.id, createdDoc.data()!);
+      final admin = await Spdb.getUser();
+      (await MastersApiService.create(_type, _body(LeadCategoryModel(
+        name: name, description: '', createdBy: admin,
+      )))).ensureSuccess();
+      ApiLive.changed(_type);
+      for (final r in await _rows()) {
+        if (Js.s(r['name']).trim().toLowerCase() == n) return ApiMappers.leadCategory(r);
+      }
+      throw 'Could not create lead category';
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("Error in getByNameOrCreate LeadCategory: $e\n$st");
-      rethrow;
+      _fail(e, st);
     }
   }
 
@@ -214,26 +103,15 @@ class LeadCategoryService {
     String? excludeUid,
   }) async {
     try {
-      var cid = await Spdb.getCid();
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.leadCategory.name)
-          .get();
-
-      for (var doc in querySnapshot.docs) {
-        if (excludeUid != null && doc.id == excludeUid) continue;
-
-        var data = doc.data();
-        if (data['name'] != null &&
-            data['name'].toString().decrypt.trim().toLowerCase() ==
-                name.trim().toLowerCase()) {
-          return 'Lead Category name already exists';
+      for (final r in await _rows()) {
+        if (excludeUid != null && Js.s(r['uid']) == excludeUid) continue;
+        if (Js.s(r['name']).trim().toLowerCase() == name.trim().toLowerCase()) {
+          return 'Lead category name already exists';
         }
       }
       return null;
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
+      ErrorService.recordError(e, st);
       return 'Error checking lead category existence: $e';
     }
   }

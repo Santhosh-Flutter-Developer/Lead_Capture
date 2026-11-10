@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '/models/models.dart';
 
 class ChatModel {
@@ -317,19 +316,6 @@ class MessagesModel {
       ),
       threadId: map['threadId'],
     );
-  }
-
-  Map<String, dynamic> toEditMap() {
-    return {
-      'message': message,
-      'edited': true,
-      'attachments': FieldValue.arrayUnion(
-        attachments.map((x) => x.toMap()).toList(),
-      ),
-      'editHistory': FieldValue.arrayUnion(
-        editHistory.map((x) => x.toMap()).toList(),
-      ),
-    };
   }
 }
 

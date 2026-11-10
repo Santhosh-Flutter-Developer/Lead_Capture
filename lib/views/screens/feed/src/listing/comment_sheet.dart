@@ -169,13 +169,16 @@ class CommentSheetState extends State<CommentSheet> {
         createdAt: DateTime.now(),
       );
 
-      await FeedService.addComment(feedId: widget.feedId, comment: newComment);
+      final savedComment = await FeedService.addComment(
+        feedId: widget.feedId,
+        comment: newComment,
+      );
       setState(() {
         _commentAuthors[widget.currentUserUid!] = _CommentAuthorDisplay(
           name: authorName,
           avatar: authorAvatar,
         );
-        _comments.insert(0, newComment);
+        _comments.insert(0, savedComment ?? newComment);
         _isPosting = false;
         _replyingTo = null;
       });
@@ -214,11 +217,23 @@ class CommentSheetState extends State<CommentSheet> {
       _comments[index] = updated;
     });
 
-    await FeedService.updateCommentReaction(
-      feedId: widget.feedId,
-      commentId: comment.commentId,
-      reactions: reactions,
-    );
+    try {
+      await FeedService.updateCommentReaction(
+        feedId: widget.feedId,
+        commentId: comment.commentId,
+        reactions: reactions,
+      );
+    } catch (e) {
+      // Not supported by the server: roll back the optimistic change.
+      if (!mounted) return;
+      setState(() {
+        final index = _comments.indexWhere(
+          (c) => c.commentId == comment.commentId,
+        );
+        if (index != -1) _comments[index] = comment;
+      });
+      FlushBar.show(context, e.toString(), isSuccess: false);
+    }
   }
 
   Future<void> _editComment(CommentModel comment) async {

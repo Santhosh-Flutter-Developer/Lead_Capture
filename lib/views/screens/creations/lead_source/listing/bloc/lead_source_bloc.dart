@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import '/services/services.dart';
@@ -8,7 +7,6 @@ part 'lead_source_event.dart';
 part 'lead_source_state.dart';
 
 class LeadSourceBloc extends Bloc<LeadSourceEvent, LeadSourceState> {
-  FirebaseFirestore firestore = FirebaseFirestore.instance;
   List<LeadSourceModel> allLeadSources = [];
 
   LeadSourceBloc() : super(LeadSourceLoading()) {
@@ -21,21 +19,11 @@ class LeadSourceBloc extends Bloc<LeadSourceEvent, LeadSourceState> {
     Emitter<LeadSourceState> emit,
   ) async {
     emit(LeadSourceLoading());
-    var cid = await Spdb.getCid();
-
     await emit.forEach(
-      firestore
-          .collection(Collections.users.name)
-          .doc(cid)
-          .collection(Collections.leadSource.name)
-          .snapshots()
-          .map((snapshot) {
-            allLeadSources = snapshot.docs
-                .map((doc) => LeadSourceModel.fromMap(doc.id, doc.data()))
-                .toList();
-
-            return allLeadSources;
-          }),
+      ApiLive.watch({'lead_source'}, () async {
+        allLeadSources = await LeadSourceService.getAllLeadSource();
+        return allLeadSources;
+      }),
       onData: (leadSource) => LeadSourceLoaded(leadSource),
       onError: (error, stackTrace) {
         return LeadSourceError("Failed to load leadSource, $error");

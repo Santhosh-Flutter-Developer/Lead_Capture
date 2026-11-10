@@ -26,7 +26,14 @@ class AuthProvider with ChangeNotifier {
         }
       }
 
-      var isLogin = await Spdb.checkLogin();
+      // Any 401/403 from the PHP API forces the user back to Login.
+      SessionManager.onUnauthorized = () {
+        // ignore: discarded_futures
+        forceLogout();
+      };
+
+      // A stored profile without an API token is not a valid session.
+      var isLogin = await Spdb.checkLogin() && await SessionManager.hasToken();
 
       bool isUpdateNeed = VersionService.version?.isUpdateNeed ?? false;
 

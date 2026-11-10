@@ -901,16 +901,9 @@ class _ChatBubbleMessageBoxState extends State<_ChatBubbleMessageBox> {
 
     chatId ??= await ChatService.createIndividualChat(userId: opponentUid);
 
-    final doc = await FirebaseFirestore.instance
-        .collection(Collections.users.name)
-        .doc(cid)
-        .collection(Collections.chats.name)
-        .doc(chatId)
-        .get();
+    final chat = await ChatService.getChat(uid: chatId);
 
-    if (!doc.exists) return;
-
-    final chat = ChatModel.fromMap(doc.id, doc.data()!);
+    if (chat == null) return;
 
     // 🔹 Step 4: Navigate
     if (!kIsMobile && widget.onOpenChat != null) {

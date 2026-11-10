@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import '/services/services.dart';
@@ -8,7 +7,6 @@ part 'payment_mode_event.dart';
 part 'payment_mode_state.dart';
 
 class PaymentModeBloc extends Bloc<PaymentModeEvent, PaymentModeState> {
-  FirebaseFirestore firestore = FirebaseFirestore.instance;
   List<PaymentModeModel> allPaymentModes = [];
 
   PaymentModeBloc() : super(PaymentModeLoading()) {
@@ -21,21 +19,11 @@ class PaymentModeBloc extends Bloc<PaymentModeEvent, PaymentModeState> {
     Emitter<PaymentModeState> emit,
   ) async {
     emit(PaymentModeLoading());
-    var cid = await Spdb.getCid();
-
     await emit.forEach(
-      firestore
-          .collection(Collections.users.name)
-          .doc(cid)
-          .collection(Collections.paymentMode.name)
-          .snapshots()
-          .map((snapshot) {
-            allPaymentModes = snapshot.docs
-                .map((doc) => PaymentModeModel.fromMap(doc.id, doc.data()))
-                .toList();
-
-            return allPaymentModes;
-          }),
+      ApiLive.watch({'payment_mode'}, () async {
+        allPaymentModes = await PaymentModeService.getAllPaymentMode();
+        return allPaymentModes;
+      }),
       onData: (paymentMode) => PaymentModeLoaded(paymentMode),
       onError: (error, stackTrace) {
         return PaymentModeError("Failed to load paymentMode, $error");

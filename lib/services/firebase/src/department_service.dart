@@ -1,26 +1,31 @@
 import 'package:flutter/material.dart';
-import '/constants/constants.dart';
+import '/utils/utils.dart';
 import '/models/models.dart';
 import '/services/services.dart';
-import '/utils/utils.dart';
 
+/// Department master – backed by masters.php?type=department (no Firestore).
 class DepartmentService {
-  static final FirebaseConfig firebase = FirebaseConfig();
+  static const String _type = MasterTypes.department;
 
-  static Future<void> createDepartment({
-    required DepartmentModel department,
-  }) async {
+  static Future<List<Map<String, dynamic>>> _rows() async {
+    final res = (await MastersApiService.list(_type)).ensureSuccess();
+    return res.dataList.map(Js.m).toList();
+  }
+
+  static Never _fail(String prefix, Object e, StackTrace st) {
+    ErrorService.recordError(e, st);
+    debugPrint("$e, $st");
+    if (e is ApiException) throw e.message;
+    throw '$prefix: $e';
+  }
+
+  static Future<void> createDepartment({required DepartmentModel department}) async {
     try {
-      var cid = await Spdb.getCid();
-      await CommonService.add(
-        '${Collections.users.name}/$cid/${Collections.departments.name}',
-        department.toMap(),
-        activity: '${department.name} has been added as a department',
-      );
+      (await MastersApiService.create(_type, {'name': department.name, 'description': department.description})).ensureSuccess();
+      ApiLookup.invalidate();
+      ApiLive.changed(_type);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error creating department: $e';
+      _fail('Error creating department', e, st);
     }
   }
 
@@ -29,110 +34,47 @@ class DepartmentService {
     required DepartmentModel department,
   }) async {
     try {
-      var cid = await Spdb.getCid();
-
-      await CommonService.update(
-        '${Collections.users.name}/$cid/${Collections.departments.name}',
-        uid,
-        department.toUpdateMap(),
-        activity: '${department.name} has been updated',
-      );
+      (await MastersApiService.update(_type, uid, {'name': department.name, 'description': department.description})).ensureSuccess();
+      ApiLookup.invalidate();
+      ApiLive.changed(_type);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error updating department: $e';
+      _fail('Error updating department', e, st);
     }
   }
 
   static Future<DepartmentModel> getDepartment({required String uid}) async {
     try {
-      var cid = await Spdb.getCid();
-      var departmentDoc = await firebase.users
-          .doc(cid)
-          .collection(Collections.departments.name)
-          .doc(uid)
-          .get();
-
-      if (departmentDoc.exists) {
-        var departmentData = departmentDoc.data();
-        if (departmentData != null) {
-          var department = DepartmentModel.fromMap(
-            departmentDoc.id,
-            departmentData,
-          );
-          return department;
-        } else {
-          throw 'Department data is empty';
-        }
-      } else {
-        throw 'Department not found';
-      }
+      final row = (await _rows()).where((r) => Js.s(r['uid']) == uid);
+      if (row.isEmpty) throw 'Department not found';
+      return ApiMappers.department(row.first);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error creating department: $e';
+      _fail('Error getting department', e, st);
     }
   }
 
   static Future<List<DepartmentModel>> getAllDepartments() async {
     try {
-      var cid = await Spdb.getCid();
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.departments.name)
-          .get();
-
-      List<DepartmentModel> departments = querySnapshot.docs.map((doc) {
-        return DepartmentModel.fromMap(doc.id, doc.data());
-      }).toList();
-
-      return departments;
+      return (await _rows()).map(ApiMappers.department).toList();
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error fetching departments: $e';
+      _fail('Error fetching departments', e, st);
     }
   }
 
-  /// Returns a user-facing message if this department cannot be
-  /// deleted (currently mapped to one or more sub departments or
-  /// employees), or null if it is safe to delete. Call this before
-  /// showing a delete confirmation so the user only sees
-  /// "are you sure?" when the delete can actually succeed.
+  /// Returns a user-facing message if this department cannot be deleted
+  /// (still assigned to an employee), otherwise null.
   static Future<String?> getDepartmentDeletionBlocker(String uid) async {
     try {
       if (uid.isEmpty) return null;
-
-      var cid = await Spdb.getCid();
-
-      var subDepartmentAssignedDocs = await firebase.users
-          .doc(cid)
-          .collection(Collections.subDepartments.name)
-          .where('department', isEqualTo: uid)
-          .limit(1)
-          .get();
-
-      if (subDepartmentAssignedDocs.docs.isNotEmpty) {
-        return 'This department has a sub department mapped to it. Please reassign or delete the sub department before deleting this department.';
-      }
-
-      // employee.department is stored as a list of department ids,
-      // so this must use arrayContains rather than isEqualTo.
-      var employeeAssignedDocs = await firebase.users
-          .doc(cid)
-          .collection(Collections.employees.name)
-          .where('department', arrayContains: uid)
-          .limit(1)
-          .get();
-
-      if (employeeAssignedDocs.docs.isNotEmpty) {
+      await ApiLookup.ensure();
+      final id = ApiLookup.idOf(ApiLookup.kDepartment, uid);
+      if (id == null) return null;
+      final emps = (await EmployeesApiService.list()).ensureSuccess().dataList.map(Js.m);
+      if (emps.any((e) => Js.i(e['department_id']) == id)) {
         return 'This department is already mapped to an employee. Please reassign or update that employee before deleting this department.';
       }
-
       return null;
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
+      ErrorService.recordError(e, st);
       return null;
     }
   }
@@ -140,94 +82,42 @@ class DepartmentService {
   static Future<void> deleteDepartment({required String uid}) async {
     try {
       final blocker = await getDepartmentDeletionBlocker(uid);
-      if (blocker != null) {
-        throw blocker;
-      }
-
-      var cid = await Spdb.getCid();
-
-      var docRef = await firebase.users
-          .doc(cid)
-          .collection(Collections.departments.name)
-          .doc(uid)
-          .get();
-
-      final data = docRef.data() as Map<String, dynamic>;
-      await TrashService.moveToTrash(
-        docRef: docRef.reference,
-        docData: data,
-        reason: 'user_deleted',
-      );
-      docRef.reference.delete();
-      var user = await Spdb.getUser();
-      ActivityLogModel activityLogModel = ActivityLogModel(
-        userData: user,
-        activity: '${data['name'].toString().decrypt} has been deleted',
-        description:
-            'User has deleted an entry in ${Collections.departments.name}',
-        collection:
-            '${Collections.users.name}/$cid/${Collections.departments.name}',
-        docId: docRef.id,
-      );
-      await CommonService.add(
-        '${Collections.users.name}/$cid/${Collections.activityLogs.name}',
-        activityLogModel.toMap(),
-      );
+      if (blocker != null) throw blocker;
+      (await MastersApiService.delete(_type, uid)).ensureSuccess();
+      ApiLookup.invalidate();
+      ApiLive.changed(_type);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
+      ErrorService.recordError(e, st);
+      if (e is ApiException) throw e.message;
       throw e.toString();
     }
   }
 
+  /// Trash restore is not exposed by masters.php (see MISSING_API_REQUIREMENTS.md).
   static Future<void> restoreDepartment(DepartmentModel department) async {
-    var cid = await Spdb.getCid();
-
-    final uid = department.uid;
-    if (uid == null || uid.isEmpty) {
-      throw Exception("UID missing");
-    }
-
-    await firebase.users
-        .doc(cid)
-        .collection(Collections.departments.name)
-        .doc(uid)
-        .set(department.toMap());
+    throw 'Restoring a deleted department is not supported by the server yet.';
   }
 
   static Future<String> getDepartmentByNameOrCreateDepartment({
     required String name,
   }) async {
     try {
-      var cid = await Spdb.getCid();
-
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.departments.name)
-          .get();
-
-      for (var doc in querySnapshot.docs) {
-        var data = doc.data();
-        if (data['name'].toString().decrypt.toLowerCase() ==
-            name.toLowerCase()) {
-          return doc.id;
+      final rows = await _rows();
+      for (final r in rows) {
+        if (Js.s(r['name']).trim().toLowerCase() == name.trim().toLowerCase()) {
+          return Js.s(r['uid']);
         }
       }
-
-      var department = DepartmentModel(
-        name: name,
-        description: '',
-        createdBy: await Spdb.getUser(),
-      );
-      var newDoc = await CommonService.add(
-        '${Collections.users.name}/$cid/${Collections.departments.name}',
-        department.toMap(),
-        activity: '${department.name} has been added as a department',
-      );
-      return newDoc.id;
+      final res = (await MastersApiService.create(_type, {
+        'name': name,
+        'description': '',
+      })).ensureSuccess();
+      ApiLookup.invalidate();
+      ApiLive.changed(_type);
+      return Js.s(res.dataMap['uid']);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
+      ErrorService.recordError(e, st);
+      if (e is ApiException) throw e.message;
       throw e.toString();
     }
   }
@@ -237,26 +127,15 @@ class DepartmentService {
     String? excludeUid,
   }) async {
     try {
-      var cid = await Spdb.getCid();
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.departments.name)
-          .get();
-
-      for (var doc in querySnapshot.docs) {
-        if (excludeUid != null && doc.id == excludeUid) continue;
-        
-        var data = doc.data();
-        if (data['name'] != null && 
-            data['name'].toString().decrypt.trim().toLowerCase() ==
-                name.trim().toLowerCase()) {
+      for (final r in await _rows()) {
+        if (excludeUid != null && Js.s(r['uid']) == excludeUid) continue;
+        if (Js.s(r['name']).trim().toLowerCase() == name.trim().toLowerCase()) {
           return 'Department name already exists';
         }
       }
       return null;
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
+      ErrorService.recordError(e, st);
       return 'Error checking department existence: $e';
     }
   }

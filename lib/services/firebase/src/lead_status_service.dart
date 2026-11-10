@@ -1,44 +1,32 @@
 import 'package:flutter/material.dart';
-import '/constants/constants.dart';
+import '/utils/utils.dart';
 import '/models/models.dart';
 import '/services/services.dart';
-import '/utils/utils.dart';
 
+/// Lead status master – backed by masters.php?type=lead_status (no Firestore).
 class LeadStatusService {
-  static final FirebaseConfig firebase = FirebaseConfig();
+  static const String _type = MasterTypes.leadStatus;
 
-  static Future<void> createLeadStatus({
-    required LeadStatusModel leadStatus,
-  }) async {
+  static Future<List<Map<String, dynamic>>> _rows() async {
+    final res = (await MastersApiService.list(_type)).ensureSuccess();
+    return res.dataList.map(Js.m).toList();
+  }
+
+  static Never _fail(Object e, StackTrace st) {
+    ErrorService.recordError(e, st);
+    debugPrint("$e, $st");
+    if (e is ApiException) throw e.message;
+    throw e.toString();
+  }
+
+  static Map<String, dynamic> _body(LeadStatusModel m) => {'name': m.name, 'description': m.description, 'color': ApiMappers.colorToServer(m.color), 'order_index': m.orderNumber, 'is_final': m.isFinal ? 1 : 0, 'is_move_to_deal': m.isMoveToDeal ? 1 : 0};
+
+  static Future<void> createLeadStatus({required LeadStatusModel leadStatus}) async {
     try {
-      var cid = await Spdb.getCid();
-
-      var lastOrderNumber = 0;
-      var lastDoc = await firebase.users
-          .doc(cid)
-          .collection(Collections.leadStatus.name)
-          .orderBy('orderNumber', descending: true)
-          .limit(1)
-          .get();
-
-      if (lastDoc.docs.isNotEmpty) {
-        lastOrderNumber = lastDoc.docs.first.data()['orderNumber'] ?? 0;
-      }
-
-      lastOrderNumber = lastOrderNumber + 1;
-
-      var leadStatusMap = leadStatus.toMap();
-      leadStatusMap['orderNumber'] = lastOrderNumber;
-
-      await CommonService.add(
-        '${Collections.users.name}/$cid/${Collections.leadStatus.name}',
-        leadStatusMap,
-        activity: '${leadStatus.name} has been added as a lead status',
-      );
+      (await MastersApiService.create(_type, _body(leadStatus))).ensureSuccess();
+      ApiLive.changed(_type);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error creating leadStatus: $e';
+      _fail(e, st);
     }
   }
 
@@ -47,223 +35,66 @@ class LeadStatusService {
     required LeadStatusModel leadStatus,
   }) async {
     try {
-      var cid = await Spdb.getCid();
-
-      await CommonService.update(
-        '${Collections.users.name}/$cid/${Collections.leadStatus.name}',
-        uid,
-        leadStatus.toUpdateMap(),
-        activity: '${leadStatus.name} has been updated',
-      );
+      (await MastersApiService.update(_type, uid, _body(leadStatus))).ensureSuccess();
+      ApiLive.changed(_type);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error updating leadStatus: $e';
+      _fail(e, st);
     }
   }
 
   static Future<LeadStatusModel> getLeadStatus({required String uid}) async {
     try {
-      var cid = await Spdb.getCid();
-      var leadStatusDoc = await firebase.users
-          .doc(cid)
-          .collection(Collections.leadStatus.name)
-          .doc(uid)
-          .get();
-
-      if (leadStatusDoc.exists) {
-        var leadStatusData = leadStatusDoc.data();
-        if (leadStatusData != null) {
-          var leadStatus = LeadStatusModel.fromMap(
-            leadStatusDoc.id,
-            leadStatusData,
-          );
-          return leadStatus;
-        } else {
-          throw 'Lead Status data is empty';
-        }
-      } else {
-        throw 'Lead Status not found';
-      }
+      final r = (await _rows()).where((r) => Js.s(r['uid']) == uid);
+      if (r.isEmpty) throw 'Lead status not found';
+      return ApiMappers.leadStatus(r.first);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error creating leadStatus: $e';
+      _fail(e, st);
     }
   }
 
   static Future<List<LeadStatusModel>> getAllLeadStatus() async {
     try {
-      var cid = await Spdb.getCid();
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.leadStatus.name)
-          .orderBy('orderNumber', descending: false)
-          .get();
-
-      List<LeadStatusModel> leadStatus = querySnapshot.docs.map((doc) {
-        return LeadStatusModel.fromMap(doc.id, doc.data());
-      }).toList();
-
-      return leadStatus;
+      return (await _rows()).map(ApiMappers.leadStatus).toList();
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error fetching leadStatus: $e';
+      _fail(e, st);
     }
   }
 
-  static Future<void> updateLeadStatusReorder({
-    required List<LeadStatusModel> leadStatusList,
-  }) async {
-    try {
-      var cid = await Spdb.getCid();
-
-      for (var i in leadStatusList) {
-        await CommonService.update(
-          '${Collections.users.name}/$cid/${Collections.leadStatus.name}',
-          i.uid ?? '',
-          {'orderNumber': i.orderNumber},
-        );
-      }
-    } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error updating leadStatus: $e';
-    }
-  }
-
-  static Future<bool> isLeadStatusAssigned(String statusUid) async {
-    try {
-      var cid = await Spdb.getCid();
-
-      final snapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.leads.name)
-          .where('leadStatus', isEqualTo: statusUid)
-          .limit(1)
-          .get();
-
-      return snapshot.docs.isNotEmpty;
-    } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("Error checking lead status assignment: $e\n$st");
-      return false;
-    }
-  }
+  /// The server refuses to delete a lead status that is in use and says
+  /// why, so no client-side pre-check is needed (deleteLeadStatus surfaces it).
+  static Future<bool> isLeadStatusAssigned(String uid) async => false;
 
   static Future<void> deleteLeadStatus({required String uid}) async {
     try {
-      var cid = await Spdb.getCid();
-
-      var docRef = await firebase.users
-          .doc(cid)
-          .collection(Collections.leadStatus.name)
-          .doc(uid)
-          .get();
-      final data = docRef.data() as Map<String, dynamic>;
-      await TrashService.moveToTrash(
-        docRef: docRef.reference,
-        docData: data,
-        reason: 'user_deleted',
-      );
-      docRef.reference.delete();
-      var user = await Spdb.getUser();
-      ActivityLogModel activityLogModel = ActivityLogModel(
-        userData: user,
-        activity: '${data['name'].toString().decrypt} has been deleted',
-        description:
-            'User has deleted an entry in ${Collections.leadStatus.name}',
-        collection:
-            '${Collections.users.name}/$cid/${Collections.leadStatus.name}',
-        docId: docRef.id,
-      );
-      await CommonService.add(
-        '${Collections.users.name}/$cid/${Collections.activityLogs.name}',
-        activityLogModel.toMap(),
-      );
+      (await MastersApiService.delete(_type, uid)).ensureSuccess();
+      ApiLive.changed(_type);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error deleting leadStatus: $e';
+      _fail(e, st);
     }
   }
 
-  static Future<void> restoreLeadStatus(LeadStatusModel status) async {
-    var cid = await Spdb.getCid();
-
-    final uid = status.uid;
-    if (uid == null || uid.isEmpty) {
-      throw Exception("UID missing");
-    }
-
-    await firebase.users
-        .doc(cid)
-        .collection(Collections.leadStatus.name)
-        .doc(uid)
-        .set(status.toMap());
+  /// Trash restore is not exposed by masters.php (see MISSING_API_REQUIREMENTS.md).
+  static Future<void> restoreLeadStatus(LeadStatusModel item) async {
+    throw 'Restoring a deleted lead status is not supported by the server yet.';
   }
 
-  static Future<bool> hasFinalStatus({String? excludeUid}) async {
-    List<LeadStatusModel> statuses = await getAllLeadStatus();
-
-    return statuses.any(
-      (s) => s.isFinal && (excludeUid == null || s.uid != excludeUid),
-    );
-  }
-
-  static Future<LeadStatusModel> getByNameOrCreate({
-    required String name,
-  }) async {
+  static Future<LeadStatusModel> getByNameOrCreate({required String name}) async {
     try {
-      var cid = await Spdb.getCid();
-
-      final query = await firebase.users
-          .doc(cid)
-          .collection(Collections.leadStatus.name)
-          .where('name', isEqualTo: name.encrypt)
-          .limit(1)
-          .get();
-
-      if (query.docs.isNotEmpty) {
-        final doc = query.docs.first;
-        return LeadStatusModel.fromMap(doc.id, doc.data());
+      final n = name.trim().toLowerCase();
+      for (final r in await _rows()) {
+        if (Js.s(r['name']).trim().toLowerCase() == n) return ApiMappers.leadStatus(r);
       }
-
-      var lastOrderNumber = 0;
-      var lastDoc = await firebase.users
-          .doc(cid)
-          .collection(Collections.leadStatus.name)
-          .orderBy('orderNumber', descending: true)
-          .limit(1)
-          .get();
-
-      if (lastDoc.docs.isNotEmpty) {
-        lastOrderNumber = lastDoc.docs.first.data()['orderNumber'] ?? 0;
+      final admin = await Spdb.getUser();
+      (await MastersApiService.create(_type, _body(LeadStatusModel(
+        name: name, description: '', color: 0xFF2E5EAA, orderNumber: 0, createdBy: admin,
+      )))).ensureSuccess();
+      ApiLive.changed(_type);
+      for (final r in await _rows()) {
+        if (Js.s(r['name']).trim().toLowerCase() == n) return ApiMappers.leadStatus(r);
       }
-
-      lastOrderNumber = lastOrderNumber + 1;
-
-      final newModel = LeadStatusModel(
-        name: name,
-        createdBy: await Spdb.getUser(),
-        description: '',
-        color: Colors.blue.toARGB32(),
-        orderNumber: lastOrderNumber,
-      );
-
-      final docRef = await firebase.users
-          .doc(cid)
-          .collection(Collections.leadStatus.name)
-          .add(newModel.toMap());
-
-      final createdDoc = await docRef.get();
-
-      return LeadStatusModel.fromMap(createdDoc.id, createdDoc.data()!);
+      throw 'Could not create lead status';
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("Error in getByNameOrCreate LeadStatus: $e\n$st");
-      rethrow;
+      _fail(e, st);
     }
   }
 
@@ -272,27 +103,33 @@ class LeadStatusService {
     String? excludeUid,
   }) async {
     try {
-      var cid = await Spdb.getCid();
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.leadStatus.name)
-          .get();
-
-      for (var doc in querySnapshot.docs) {
-        if (excludeUid != null && doc.id == excludeUid) continue;
-
-        var data = doc.data();
-        if (data['name'] != null &&
-            data['name'].toString().decrypt.trim().toLowerCase() ==
-                name.trim().toLowerCase()) {
-          return 'Lead Status name already exists';
+      for (final r in await _rows()) {
+        if (excludeUid != null && Js.s(r['uid']) == excludeUid) continue;
+        if (Js.s(r['name']).trim().toLowerCase() == name.trim().toLowerCase()) {
+          return 'Lead status name already exists';
         }
       }
       return null;
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
+      ErrorService.recordError(e, st);
       return 'Error checking lead status existence: $e';
     }
+  }
+
+  static Future<void> updateLeadStatusReorder({required List<LeadStatusModel> leadStatusList}) async {
+    try {
+      for (final m in leadStatusList) {
+        if (m.uid == null) continue;
+        (await MastersApiService.update(_type, m.uid!, _body(m))).ensureSuccess();
+      }
+      ApiLive.changed(_type);
+    } catch (e, st) {
+      _fail(e, st);
+    }
+  }
+
+  static Future<bool> hasFinalStatus({String? excludeUid}) async {
+    final statuses = await getAllLeadStatus();
+    return statuses.any((s) => s.isFinal && (excludeUid == null || s.uid != excludeUid));
   }
 }

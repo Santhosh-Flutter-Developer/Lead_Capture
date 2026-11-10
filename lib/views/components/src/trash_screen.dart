@@ -1,14 +1,30 @@
 import 'dart:async';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:iconsax/iconsax.dart';
 import 'package:intl/intl.dart';
-import 'package:leadcapture/models/src/trash_model.dart';
+import '/services/api/api.dart';
 import '/theme/theme.dart';
 import '/constants/constants.dart';
 import '/services/services.dart';
 import '/utils/utils.dart';
 import '/views/views.dart';
+
+/// One deleted record returned by settings.php `trash_list`.
+class _TrashItem {
+  final String uid;
+  final String table;
+  final String type;
+  final String title;
+  final DateTime deletedAt;
+  _TrashItem({
+    required this.uid,
+    required this.table,
+    required this.type,
+    required this.title,
+    required this.deletedAt,
+  });
+  String get id => '$table:$uid';
+}
 
 class TrashScreen extends StatefulWidget {
   const TrashScreen({super.key});
@@ -20,7 +36,6 @@ class TrashScreen extends StatefulWidget {
 // TrashColors removed in favor of Theme.of(context)
 
 class _TrashScreenState extends State<TrashScreen> {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final ScrollController _vScrollController = ScrollController();
   static const List<Color> _brandGradient = [
     Color(0xFF0052D4),
@@ -31,9 +46,9 @@ class _TrashScreenState extends State<TrashScreen> {
   bool _selectionMode = false;
   bool _isProcessing = false;
   final Set<String> _selectedIds = {};
-  QuerySnapshot? _lastSnapshot;
-
-  Query<Map<String, dynamic>>? _trashRef;
+  List<_TrashItem> _items = [];
+  bool _loaded = false;
+  String? _loadError;
   final TextEditingController _searchController = TextEditingController();
   String _search = '';
 
@@ -55,23 +70,33 @@ class _TrashScreenState extends State<TrashScreen> {
     super.dispose();
   }
 
-  Future<void> _init() async {
-    final cid = await Spdb.getCid();
-    final uid = await Spdb.getUid();
-    debugPrint('Trash uid: $uid');
+  Future<void> _init() => _load();
 
-    final ref = _firestore
-        .collection(Collections.users.name)
-        .doc(cid)
-        .collection(Collections.trash.name)
-        .where('deletedBy', isEqualTo: uid)
-        .orderBy('deletedAt', descending: true);
-
-    if (!mounted) return;
-
-    setState(() {
-      _trashRef = ref;
-    });
+  Future<void> _load() async {
+    try {
+      final res = (await SettingsApiService.call('trash_list')).ensureSuccess();
+      final items = Js.mapList(res.data).map((m) {
+        return _TrashItem(
+          uid: Js.s(m['uid']),
+          table: Js.s(m['table']),
+          type: Js.s(m['type']),
+          title: Js.s(m['title'], 'Untitled'),
+          deletedAt: Js.dt(m['deleted_at']) ?? DateTime.now(),
+        );
+      }).toList();
+      if (!mounted) return;
+      setState(() {
+        _items = items;
+        _loaded = true;
+        _loadError = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loaded = true;
+        _loadError = e.toString();
+      });
+    }
   }
 
   String _timeAgo(DateTime dt) {
@@ -115,7 +140,7 @@ class _TrashScreenState extends State<TrashScreen> {
   }
 
   Future<void> _restoreSingle(
-    DocumentSnapshot<Map<String, dynamic>> doc,
+    _TrashItem doc,
   ) async {
     final confirm = await _confirmRestore(count: 1);
     if (!confirm) return;
@@ -123,7 +148,7 @@ class _TrashScreenState extends State<TrashScreen> {
     try {
       setState(() => _isProcessing = true);
 
-      await _restoreDoc(doc);
+      await _restoreItems([doc]);
 
       if (mounted) {
         FlushBar.show(context, 'Item restored');
@@ -138,11 +163,9 @@ class _TrashScreenState extends State<TrashScreen> {
   }
 
   Future<void> _restoreSelected() async {
-    if (_lastSnapshot == null || _selectedIds.isEmpty) return;
+    if (_selectedIds.isEmpty) return;
 
-    final docs = _lastSnapshot!.docs
-        .where((d) => _selectedIds.contains(d.id))
-        .toList();
+    final docs = _items.where((d) => _selectedIds.contains(d.id)).toList();
 
     final confirm = await _confirmRestore(count: docs.length);
     if (!confirm) return;
@@ -150,9 +173,7 @@ class _TrashScreenState extends State<TrashScreen> {
     setState(() => _isProcessing = true);
 
     try {
-      for (final doc in docs) {
-        await _restoreDoc(doc as DocumentSnapshot<Map<String, dynamic>>);
-      }
+      await _restoreItems(docs);
 
       if (mounted) {
         FlushBar.show(context, 'Restored ${docs.length} item(s)');
@@ -168,27 +189,14 @@ class _TrashScreenState extends State<TrashScreen> {
     }
   }
 
-  Future<void> _restoreDoc(
-    DocumentSnapshot<Map<String, dynamic>> trashDoc,
-  ) async {
-    final data = trashDoc.data() ?? {};
-
-    final originalPath = data['originalPath'] as String? ?? '';
-    final canRestoreTo = data['canRestoreTo'] as String? ?? originalPath;
-
-    if (canRestoreTo.isEmpty) {
-      throw Exception('Missing original path for restore');
-    }
-
-    final innerData = (data['data'] ?? {}) as Map<String, dynamic>;
-
-    final originalDocRef = _firestore.doc(canRestoreTo);
-
-    final batch = _firestore.batch();
-    batch.set(originalDocRef, innerData, SetOptions(merge: false));
-    batch.delete(trashDoc.reference);
-
-    await batch.commit();
+  /// settings.php trash_restore (clears deleted_at on the server).
+  Future<void> _restoreItems(List<_TrashItem> items) async {
+    (await SettingsApiService.call('trash_restore', {
+      'items': items.map((e) => {'table': e.table, 'uid': e.uid}).toList(),
+    }))
+        .ensureSuccess();
+    ApiLive.changed({'leads', 'deals', 'tasks', 'tickets', 'projects', 'clients'});
+    await _load();
   }
 
   Future<bool> _confirmRestore({required int count}) async {
@@ -231,24 +239,15 @@ class _TrashScreenState extends State<TrashScreen> {
     return result ?? false;
   }
 
-  Map<String, List<QueryDocumentSnapshot<Map<String, dynamic>>>> _groupByDay(
-    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
-  ) {
-    final map = <String, List<QueryDocumentSnapshot<Map<String, dynamic>>>>{};
+  Map<String, List<_TrashItem>> _groupByDay(List<_TrashItem> docs) {
+    final map = <String, List<_TrashItem>>{};
     final now = DateTime.now();
 
     for (final doc in docs) {
-      final data = doc.data();
-      final ts = data['deletedAt'];
-
-      DateTime dt = now;
-      if (ts is Timestamp) dt = ts.toDate();
-
-      final diff = DateTime(
-        dt.year,
-        dt.month,
-        dt.day,
-      ).difference(DateTime(now.year, now.month, now.day)).inDays;
+      final dt = doc.deletedAt;
+      final diff = DateTime(dt.year, dt.month, dt.day)
+          .difference(DateTime(now.year, now.month, now.day))
+          .inDays;
 
       String label;
       if (diff == 0) {
@@ -265,7 +264,7 @@ class _TrashScreenState extends State<TrashScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_trashRef == null) {
+    if (!_loaded) {
       return Scaffold(
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         body: Column(
@@ -356,7 +355,7 @@ class _TrashScreenState extends State<TrashScreen> {
                   size: 18,
                   color: AppColors.white,
                 ),
-                onPressed: () => setState(() {}),
+                onPressed: _load,
               ),
             ],
           ),
@@ -417,34 +416,15 @@ class _TrashScreenState extends State<TrashScreen> {
   Widget _buildBody(BuildContext context) {
     return Stack(
       children: [
-        StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: _trashRef!.snapshots(),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return WaitingLoading();
+        Builder(
+          builder: (context) {
+            if (_loadError != null && _items.isEmpty) {
+              return Center(child: Text(_loadError!));
             }
-
-            if (!snapshot.hasData) {
-              return WaitingLoading();
-            }
-
-            final docs = snapshot.data!.docs;
-
-            final filteredDocs = docs.where((doc) {
+            final filteredDocs = _items.where((d) {
               if (_search.isEmpty) return true;
-
-              final data = doc.data();
-              final inner = (data['data'] ?? {}) as Map<String, dynamic>;
-
-              final title = inner['title']?.toString().toLowerCase() ?? '';
-              final name = inner['name']?.toString().toLowerCase() ?? '';
-              final path = (data['originalPath'] ?? '')
-                  .toString()
-                  .toLowerCase();
-
-              return title.contains(_search) ||
-                  name.contains(_search) ||
-                  path.contains(_search);
+              return d.title.toLowerCase().contains(_search) ||
+                  d.type.toLowerCase().contains(_search);
             }).toList();
 
             if (filteredDocs.isEmpty) {
@@ -483,12 +463,10 @@ class _TrashScreenState extends State<TrashScreen> {
               );
             }
 
-            _lastSnapshot = snapshot.data;
-
             final grouped = _groupByDay(filteredDocs);
 
             return RefreshIndicator(
-              onRefresh: () async {},
+              onRefresh: _load,
               child: ScrollConfiguration(
                 behavior: ScrollConfiguration.of(
                   context,
@@ -656,21 +634,11 @@ class _TrashScreenState extends State<TrashScreen> {
     );
   }
 
-  Widget _buildTrashCard(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
-    final trash = TrashModel.fromMap(doc.data());
+  Widget _buildTrashCard(_TrashItem doc) {
     final id = doc.id;
-
-    final innerData = trash.data;
-    final collection = trash.collection;
-
-    String title =
-        innerData['title']?.toString() ??
-        innerData['name']?.toString() ??
-        'Untitled';
-
-    title = "${title.decrypt} ";
-
-    final time = _timeAgo(trash.deletedAt);
+    final collection = doc.type;
+    final title = doc.title;
+    final time = _timeAgo(doc.deletedAt);
     final selected = _selectedIds.contains(id);
 
     return GestureDetector(
@@ -769,7 +737,7 @@ class _TrashScreenState extends State<TrashScreen> {
 
                         Expanded(
                           child: Text(
-                            trash.canRestoreTo,
+                            doc.table,
                             maxLines: 1,
                             style: TextStyle(
                               fontSize: 11,

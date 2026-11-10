@@ -1,12 +1,6 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 import '/models/models.dart';
 
 DateTime _dateTimeFromValue(dynamic value) {
-  if (value is Timestamp) {
-    return value.toDate();
-  }
-
   if (value is String) {
     return DateTime.tryParse(value) ?? DateTime.now();
   }
@@ -218,9 +212,7 @@ class FeedHistoryModel {
 
   factory FeedHistoryModel.fromMap(Map<String, dynamic> map) {
     return FeedHistoryModel(
-      timestamp: map['timestamp'] is Timestamp
-          ? (map['timestamp'] as Timestamp).toDate()
-          : map['timestamp'] is int
+      timestamp: map['timestamp'] is int
           ? DateTime.fromMillisecondsSinceEpoch(map['timestamp'] as int)
           : map['timestamp'] is String
           ? DateTime.tryParse(map['timestamp'] as String) ?? DateTime.now()
@@ -398,9 +390,7 @@ class CommentModel {
               ),
             )
           : {},
-      createdAt: map['createdAt'] != null && map['createdAt'] is Timestamp
-          ? (map['createdAt'] as Timestamp).toDate()
-          : DateTime.now(),
+      createdAt: _dateTimeFromValue(map['createdAt']),
     );
   }
 
@@ -413,7 +403,7 @@ class CommentModel {
       'content': content,
       'replyToCommentId': replyToCommentId,
       'reactions': reactions,
-      'createdAt': Timestamp.fromDate(createdAt),
+      'createdAt': createdAt.toIso8601String(),
     };
   }
 }

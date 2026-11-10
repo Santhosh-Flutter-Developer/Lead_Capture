@@ -128,11 +128,11 @@ class _CompanyRegistrationState extends State<CompanyRegistration>
       setState(() => _isSubmitting = true);
       try {
         futureLoading(context);
-        final existingAdmin = await AuthService.checkEmailExists(
-          email: _adminEmail.text.trim(),
+        final emailTaken = await AuthService.isRegistrationEmailTaken(
+          _adminEmail.text.trim(),
         );
 
-        if (existingAdmin != null) {
+        if (emailTaken) {
           if (Navigator.canPop(context)) Navigator.pop(context);
 
           FlushBar.show(

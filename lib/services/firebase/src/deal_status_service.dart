@@ -1,44 +1,32 @@
 import 'package:flutter/material.dart';
-import '/constants/constants.dart';
+import '/utils/utils.dart';
 import '/models/models.dart';
 import '/services/services.dart';
-import '/utils/utils.dart';
 
+/// Deal status master – backed by masters.php?type=deal_status (no Firestore).
 class DealStatusService {
-  static final FirebaseConfig firebase = FirebaseConfig();
+  static const String _type = MasterTypes.dealStatus;
 
-  static Future<void> createDealStatus({
-    required DealStatusModel dealStatus,
-  }) async {
+  static Future<List<Map<String, dynamic>>> _rows() async {
+    final res = (await MastersApiService.list(_type)).ensureSuccess();
+    return res.dataList.map(Js.m).toList();
+  }
+
+  static Never _fail(Object e, StackTrace st) {
+    ErrorService.recordError(e, st);
+    debugPrint("$e, $st");
+    if (e is ApiException) throw e.message;
+    throw e.toString();
+  }
+
+  static Map<String, dynamic> _body(DealStatusModel m) => {'name': m.name, 'description': m.description, 'color': ApiMappers.colorToServer(m.color), 'order_index': m.orderNumber, 'is_final': m.isFinal ? 1 : 0, 'is_move_to_deal': m.isMoveToDeal ? 1 : 0};
+
+  static Future<void> createDealStatus({required DealStatusModel dealStatus}) async {
     try {
-      var cid = await Spdb.getCid();
-
-      var lastOrderNumber = 0;
-      var lastDoc = await firebase.users
-          .doc(cid)
-          .collection(Collections.dealStatus.name)
-          .orderBy('orderNumber', descending: true)
-          .limit(1)
-          .get();
-
-      if (lastDoc.docs.isNotEmpty) {
-        lastOrderNumber = lastDoc.docs.first.data()['orderNumber'] ?? 0;
-      }
-
-      lastOrderNumber = lastOrderNumber + 1;
-
-      var dealStatusMap = dealStatus.toMap();
-      dealStatusMap['orderNumber'] = lastOrderNumber;
-
-      await CommonService.add(
-        '${Collections.users.name}/$cid/${Collections.dealStatus.name}',
-        dealStatusMap,
-        activity: '${dealStatus.name} has been added as a deal status',
-      );
+      (await MastersApiService.create(_type, _body(dealStatus))).ensureSuccess();
+      ApiLive.changed(_type);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error creating dealStatus: $e';
+      _fail(e, st);
     }
   }
 
@@ -47,222 +35,66 @@ class DealStatusService {
     required DealStatusModel dealStatus,
   }) async {
     try {
-      var cid = await Spdb.getCid();
-
-      await CommonService.update(
-        '${Collections.users.name}/$cid/${Collections.dealStatus.name}',
-        uid,
-        dealStatus.toUpdateMap(),
-        activity: '${dealStatus.name} has been updated',
-      );
+      (await MastersApiService.update(_type, uid, _body(dealStatus))).ensureSuccess();
+      ApiLive.changed(_type);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error updating dealStatus: $e';
+      _fail(e, st);
     }
   }
 
   static Future<DealStatusModel> getDealStatus({required String uid}) async {
     try {
-      var cid = await Spdb.getCid();
-      var dealStatusDoc = await firebase.users
-          .doc(cid)
-          .collection(Collections.dealStatus.name)
-          .doc(uid)
-          .get();
-
-      if (dealStatusDoc.exists) {
-        var dealStatusData = dealStatusDoc.data();
-        if (dealStatusData != null) {
-          var dealStatus = DealStatusModel.fromMap(
-            dealStatusDoc.id,
-            dealStatusData,
-          );
-          return dealStatus;
-        } else {
-          throw 'Deal Status data is empty';
-        }
-      } else {
-        throw 'Deal Status not found';
-      }
+      final r = (await _rows()).where((r) => Js.s(r['uid']) == uid);
+      if (r.isEmpty) throw 'Deal status not found';
+      return ApiMappers.dealStatus(r.first);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error creating dealStatus: $e';
+      _fail(e, st);
     }
   }
 
   static Future<List<DealStatusModel>> getAllDealStatus() async {
     try {
-      var cid = await Spdb.getCid();
-      // No server-side orderBy: Firestore leaves out documents that lack the
-      // 'orderNumber' field, which made such statuses disappear. Sort here
-      // instead (DealStatusModel.fromMap defaults a missing orderNumber).
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.dealStatus.name)
-          .get();
-
-      List<DealStatusModel> dealStatus = querySnapshot.docs.map((doc) {
-        return DealStatusModel.fromMap(doc.id, doc.data());
-      }).toList()
-        ..sort((a, b) => a.orderNumber.compareTo(b.orderNumber));
-
-      return dealStatus;
+      return (await _rows()).map(ApiMappers.dealStatus).toList();
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error fetching dealStatus: $e';
+      _fail(e, st);
     }
   }
 
-  static Future<void> updateDealStatusReorder({
-    required List<DealStatusModel> dealStatusList,
-  }) async {
-    try {
-      var cid = await Spdb.getCid();
-
-      for (var i in dealStatusList) {
-        await CommonService.update(
-          '${Collections.users.name}/$cid/${Collections.dealStatus.name}',
-          i.uid ?? '',
-          {'orderNumber': i.orderNumber},
-        );
-      }
-    } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error updating dealStatus: $e';
-    }
-  }
-
-  static Future<bool> isDealStatusAssigned(String statusUid) async {
-    try {
-      var cid = await Spdb.getCid();
-
-      final snapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.deals.name)
-          .where('dealStatus', isEqualTo: statusUid)
-          .limit(1)
-          .get();
-
-      return snapshot.docs.isNotEmpty;
-    } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("Error checking deal status assignment: $e\n$st");
-      return false;
-    }
-  }
+  /// The server refuses to delete a deal status that is in use and says
+  /// why, so no client-side pre-check is needed (deleteDealStatus surfaces it).
+  static Future<bool> isDealStatusAssigned(String uid) async => false;
 
   static Future<void> deleteDealStatus({required String uid}) async {
     try {
-      var cid = await Spdb.getCid();
-
-      var docRef = await firebase.users
-          .doc(cid)
-          .collection(Collections.dealStatus.name)
-          .doc(uid)
-          .get();
-
-      final data = docRef.data() as Map<String, dynamic>;
-
-      await TrashService.moveToTrash(
-        docRef: docRef.reference,
-        docData: data,
-        reason: 'user_deleted',
-      );
-
-      await docRef.reference.delete();
-      var user = await Spdb.getUser();
-      ActivityLogModel activityLogModel = ActivityLogModel(
-        userData: user,
-        activity: '${data['name'].toString().decrypt} has been deleted',
-        description:
-            'User has deleted an entry in ${Collections.dealStatus.name}',
-        collection:
-            '${Collections.users.name}/$cid/${Collections.dealStatus.name}',
-        docId: docRef.id,
-      );
-      await CommonService.add(
-        '${Collections.users.name}/$cid/${Collections.activityLogs.name}',
-        activityLogModel.toMap(),
-      );
+      (await MastersApiService.delete(_type, uid)).ensureSuccess();
+      ApiLive.changed(_type);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("Error deleting deal status: $e\n$st");
-      throw 'Error deleting deal status: $e';
+      _fail(e, st);
     }
   }
 
-  static Future<void> restoreDealStatus(DealStatusModel status) async {
-    var cid = await Spdb.getCid();
-
-    final uid = status.uid;
-    if (uid == null || uid.isEmpty) {
-      throw Exception("UID missing");
-    }
-
-    await firebase.users
-        .doc(cid)
-        .collection(Collections.dealStatus.name)
-        .doc(uid)
-        .set(status.toMap());
+  /// Trash restore is not exposed by masters.php (see MISSING_API_REQUIREMENTS.md).
+  static Future<void> restoreDealStatus(DealStatusModel item) async {
+    throw 'Restoring a deleted deal status is not supported by the server yet.';
   }
 
-  static Future<DealStatusModel> getByNameOrCreate({
-    required String name,
-  }) async {
+  static Future<DealStatusModel> getByNameOrCreate({required String name}) async {
     try {
-      var cid = await Spdb.getCid();
-
-      final query = await firebase.users
-          .doc(cid)
-          .collection(Collections.dealStatus.name)
-          .where('name', isEqualTo: name.encrypt)
-          .limit(1)
-          .get();
-
-      if (query.docs.isNotEmpty) {
-        final doc = query.docs.first;
-        return DealStatusModel.fromMap(doc.id, doc.data());
+      final n = name.trim().toLowerCase();
+      for (final r in await _rows()) {
+        if (Js.s(r['name']).trim().toLowerCase() == n) return ApiMappers.dealStatus(r);
       }
-
-      // Get the next order number
-      var lastOrderNumber = 0;
-      var lastDoc = await firebase.users
-          .doc(cid)
-          .collection(Collections.dealStatus.name)
-          .orderBy('orderNumber', descending: true)
-          .limit(1)
-          .get();
-
-      if (lastDoc.docs.isNotEmpty) {
-        lastOrderNumber = lastDoc.docs.first.data()['orderNumber'] ?? 0;
+      final admin = await Spdb.getUser();
+      (await MastersApiService.create(_type, _body(DealStatusModel(
+        name: name, description: '', color: 0xFF2E5EAA, orderNumber: 0, createdBy: admin,
+      )))).ensureSuccess();
+      ApiLive.changed(_type);
+      for (final r in await _rows()) {
+        if (Js.s(r['name']).trim().toLowerCase() == n) return ApiMappers.dealStatus(r);
       }
-
-      lastOrderNumber = lastOrderNumber + 1;
-
-      final newModel = DealStatusModel(
-        name: name,
-        createdBy: await Spdb.getUser(),
-        description: '',
-        orderNumber: lastOrderNumber,
-        color: Colors.blue.toARGB32(),
-      );
-
-      final docRef = await firebase.users
-          .doc(cid)
-          .collection(Collections.dealStatus.name)
-          .add(newModel.toMap());
-
-      final createdDoc = await docRef.get();
-
-      return DealStatusModel.fromMap(createdDoc.id, createdDoc.data()!);
+      throw 'Could not create deal status';
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("Error in getByNameOrCreate DealStatus: $e\n$st");
-      rethrow;
+      _fail(e, st);
     }
   }
 
@@ -271,27 +103,28 @@ class DealStatusService {
     String? excludeUid,
   }) async {
     try {
-      var cid = await Spdb.getCid();
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.dealStatus.name)
-          .get();
-
-      for (var doc in querySnapshot.docs) {
-        if (excludeUid != null && doc.id == excludeUid) continue;
-
-        var data = doc.data();
-        if (data['name'] != null &&
-            data['name'].toString().decrypt.trim().toLowerCase() ==
-                name.trim().toLowerCase()) {
-          return 'Deal Status name already exists';
+      for (final r in await _rows()) {
+        if (excludeUid != null && Js.s(r['uid']) == excludeUid) continue;
+        if (Js.s(r['name']).trim().toLowerCase() == name.trim().toLowerCase()) {
+          return 'Deal status name already exists';
         }
       }
       return null;
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
+      ErrorService.recordError(e, st);
       return 'Error checking deal status existence: $e';
+    }
+  }
+
+  static Future<void> updateDealStatusReorder({required List<DealStatusModel> dealStatusList}) async {
+    try {
+      for (final m in dealStatusList) {
+        if (m.uid == null) continue;
+        (await MastersApiService.update(_type, m.uid!, _body(m))).ensureSuccess();
+      }
+      ApiLive.changed(_type);
+    } catch (e, st) {
+      _fail(e, st);
     }
   }
 }

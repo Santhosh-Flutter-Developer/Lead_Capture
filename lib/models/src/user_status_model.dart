@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import '/models/src/timestamp.dart';
 
 class UserStatusModel {
   final bool isOnline;

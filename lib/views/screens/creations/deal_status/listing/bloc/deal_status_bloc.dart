@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import '/services/services.dart';
@@ -8,7 +7,6 @@ part 'deal_status_event.dart';
 part 'deal_status_state.dart';
 
 class DealStatusBloc extends Bloc<DealStatusEvent, DealStatusState> {
-  FirebaseFirestore firestore = FirebaseFirestore.instance;
   List<DealStatusModel> allDealStatus = [];
 
   DealStatusBloc() : super(DealStatusLoading()) {
@@ -21,22 +19,12 @@ class DealStatusBloc extends Bloc<DealStatusEvent, DealStatusState> {
     Emitter<DealStatusState> emit,
   ) async {
     emit(DealStatusLoading());
-    var cid = await Spdb.getCid();
-
     await emit.forEach(
-      firestore
-          .collection(Collections.users.name)
-          .doc(cid)
-          .collection(Collections.dealStatus.name)
-          .orderBy('orderNumber', descending: true)
-          .snapshots()
-          .map((snapshot) {
-            allDealStatus = snapshot.docs
-                .map((doc) => DealStatusModel.fromMap(doc.id, doc.data()))
-                .toList();
-
-            return allDealStatus;
-          }),
+      ApiLive.watch({'deal_status'}, () async {
+        allDealStatus = await DealStatusService.getAllDealStatus();
+        allDealStatus.sort((a, b) => b.orderNumber.compareTo(a.orderNumber));
+        return allDealStatus;
+      }),
       onData: (dealStatus) => DealStatusLoaded(dealStatus),
       onError: (error, stackTrace) {
         return DealStatusError("Failed to load dealStatus, $error");

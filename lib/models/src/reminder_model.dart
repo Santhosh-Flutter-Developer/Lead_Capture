@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import '/models/src/timestamp.dart';
 import '/models/models.dart';
 
 class ReminderModel {
@@ -54,9 +54,9 @@ class ReminderModel {
         map['notification']['uid'],
         map['notification'] as Map<String, dynamic>,
       ),
-      scheduledAt: (map['scheduledAt'] as Timestamp).toDate(),
+      scheduledAt: anyToDate(map['scheduledAt']),
       isSent: map['isSent'] as bool,
-      createdAt: (map['createdAt'] as Timestamp).toDate(),
+      createdAt: anyToDate(map['createdAt']),
       createdBy: UserDataModel.fromMap(
         map['createdBy'] as Map<String, dynamic>,
       ),

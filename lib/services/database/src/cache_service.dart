@@ -16,10 +16,8 @@ class _BoxConfig {
 }
 
 class CacheService {
-  static final FirebaseConfig _firebase = FirebaseConfig();
-
   // --- CONFIGURATION MAP ---
-  // Maps specific keys to their Box and Firestore Collection names
+  // Maps specific keys to their Hive box (filled from the PHP API services)
   static const Map<String, _BoxConfig> _config = {
     'employee': _BoxConfig('employees', 'employees'),
     'admin': _BoxConfig('admins', 'admins'),
@@ -152,7 +150,7 @@ class CacheService {
         return fromMap(uid, Map<String, dynamic>.from(normalized as Map));
       }
 
-      // Not found: Fetch specific document from Firestore
+      // Not found: refresh this list from the API
       _fetchSingleDocument(uid, conf);
 
       return null;
@@ -162,46 +160,68 @@ class CacheService {
     }
   }
 
-  /// Fetches a single document from Firestore and updates Hive
+  /// A single record cannot be fetched by uid from the API for every entity,
+  /// so a cache miss refreshes that entity's whole list (debounced).
   static Future<void> _fetchSingleDocument(String uid, _BoxConfig conf) async {
-    // 1. Debounce: If we are already fetching this ID, don't do it again.
-    final fetchKey = "${conf.collectionName}_$uid";
+    if (uid.isEmpty) return;
+    final fetchKey = conf.boxName;
     if (_pendingFetches.contains(fetchKey)) return;
-
     _pendingFetches.add(fetchKey);
-
     try {
-      debugPrint(
-        "Cache Miss: Fetching single doc $uid from ${conf.collectionName}",
-      );
-
-      // Check Auth
-      if (!(await Spdb.checkLogin())) return;
-      final cid = await Spdb.getCid();
-      if (cid == null) return;
-
-      if (uid.isEmpty) return;
-
-      // 2. Fetch from Firestore
-      final docSnap = await _firebase.users
-          .doc(cid)
-          .collection(conf.collectionName)
-          .doc(uid)
-          .get();
-
-      if (docSnap.exists && docSnap.data() != null) {
-        // 3. Update Cache
-        final box = Hive.box<Map<dynamic, dynamic>>(conf.boxName);
-        await box.put(uid, docSnap.data()!);
-        debugPrint("Cache Updated: $uid added to ${conf.boxName}");
-      } else {
-        debugPrint("Document $uid does not exist in Firestore.");
-      }
+      final key = _config.entries.firstWhere((e) => e.value == conf).key;
+      await syncSelectedCollections([key]);
     } catch (e) {
-      debugPrint("Single doc fetch failed: $e");
+      debugPrint("Cache refresh failed: $e");
     } finally {
-      _pendingFetches.remove(fetchKey);
+      // Avoid hammering the API when the uid really does not exist.
+      Future.delayed(const Duration(seconds: 20), () => _pendingFetches.remove(fetchKey));
     }
+  }
+
+  /// Loads one entity list through the migrated API services and returns
+  /// {uid: model.toMap()} (the exact shape the models' fromMap reads).
+  static Future<Map<String, Map<String, dynamic>>> _load(String key) async {
+    Map<String, Map<String, dynamic>> out(
+      Iterable<dynamic> items,
+      String? Function(dynamic) uid,
+      Map<String, dynamic> Function(dynamic) map,
+    ) {
+      final m = <String, Map<String, dynamic>>{};
+      for (final i in items) {
+        final id = uid(i);
+        if (id == null || id.isEmpty) continue;
+        m[id] = map(i);
+      }
+      return m;
+    }
+
+    switch (key) {
+      case 'employee':
+        return out(await EmployeeService.getAllEmployees(), (e) => e.uid, (e) => e.toMap());
+      case 'admin':
+        return out(await AdminService.getAllAdmins(), (e) => e.uid, (e) => e.toMap());
+      case 'department':
+        return out(await DepartmentService.getAllDepartments(), (e) => e.uid, (e) => e.toMap());
+      case 'designation':
+        return out(await DesignationService.getAllDesignations(), (e) => e.uid, (e) => e.toMap());
+      case 'role':
+        return out(await RoleService.getAllRoles(), (e) => e.uid, (e) => e.toMap());
+      case 'subDepartment':
+        return out(await SubDepartmentService.getAllSubDepartments(), (e) => e.uid, (e) => e.toMap());
+      case 'leadCategory':
+        return out(await LeadCategoryService.getAllLeadCategories(), (e) => e.uid, (e) => e.toMap());
+      case 'leadStatus':
+        return out(await LeadStatusService.getAllLeadStatus(), (e) => e.uid, (e) => e.toMap());
+      case 'leadPriority':
+        return out(await LeadPriorityService.getAllLeadPriority(), (e) => e.uid, (e) => e.toMap());
+      case 'dealStatus':
+        return out(await DealStatusService.getAllDealStatus(), (e) => e.uid, (e) => e.toMap());
+      case 'project':
+        return out(await ProjectService.getAllProjects(), (e) => e.uid, (e) => e.toMap());
+      case 'task':
+        return out(await TaskService.getAllTasks(), (e) => e.uid, (e) => e.toMap());
+    }
+    return {};
   }
 
   // ---------------- PUBLIC ACCESSORS ----------------
@@ -334,34 +354,25 @@ class CacheService {
 
     debugPrint("CacheService: Syncing selected: $configKeys");
     if (!(await Spdb.checkLogin())) return;
-    final cid = await Spdb.getCid();
-    if (cid == null) return;
 
-    final userRef = _firebase.users.doc(cid);
-
-    try {
-      // Create a list of futures to run in parallel
-      final futures = configKeys.map((key) async {
-        final conf = _config[key];
-        if (conf == null) return;
-
-        // Fetch
-        final snapshot = await userRef.collection(conf.collectionName).get();
+    // Each list is independent: one failing (e.g. no permission) must not
+    // stop the others.
+    await Future.wait(configKeys.map((key) async {
+      final conf = _config[key];
+      if (conf == null) return;
+      try {
+        final data = await _load(key);
         final box = Hive.box<Map<dynamic, dynamic>>(conf.boxName);
-
-        // Clear and Write
         await box.clear();
-        await box.putAll({for (var doc in snapshot.docs) doc.id: doc.data()});
-        debugPrint("Synced ${conf.collectionName}");
-      });
+        await box.putAll(data);
+        debugPrint("Synced ${conf.boxName} (${data.length})");
+      } catch (e) {
+        debugPrint("Sync $key failed: $e");
+      }
+    }));
 
-      await Future.wait(futures);
-
-      // Update Sync Time
+    if (Hive.isBoxOpen(_metaBox)) {
       Hive.box(_metaBox).put('lastSync', DateTime.now().millisecondsSinceEpoch);
-    } catch (e, st) {
-      debugPrint("Sync Selected Failed: $e");
-      await ErrorService.recordError(e, st);
     }
   }
 

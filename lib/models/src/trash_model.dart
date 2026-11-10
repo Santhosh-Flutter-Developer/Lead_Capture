@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import '/models/src/timestamp.dart';
 
 class TrashModel {
   final String originalPath;
@@ -30,7 +30,7 @@ class TrashModel {
       'documentId': documentId,
       'parentPath': parentPath,
       'data': data,
-      'deletedAt': Timestamp.fromDate(deletedAt),
+      'deletedAt': deletedAt.millisecondsSinceEpoch,
       'deletedBy': deletedBy,
       'reason': reason,
       'canRestoreTo': canRestoreTo,
@@ -44,7 +44,7 @@ class TrashModel {
       documentId: map['documentId'] as String,
       parentPath: map['parentPath'] as String,
       data: Map<String, dynamic>.from(map['data'] as Map),
-      deletedAt: (map['deletedAt'] as Timestamp).toDate(),
+      deletedAt: anyToDate(map['deletedAt']),
       deletedBy: map['deletedBy'] as String?,
       reason: map['reason'] as String?,
       canRestoreTo: map['canRestoreTo'] as String,

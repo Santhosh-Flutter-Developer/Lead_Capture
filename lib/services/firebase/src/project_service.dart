@@ -1,315 +1,106 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import '/constants/constants.dart';
-import '/models/models.dart';
 import '/services/services.dart';
+import '/models/models.dart';
 
+/// Projects – backed by projects.php (no Firestore). A project needs an
+/// associated deal (`deal_id`) on the server.
 class ProjectService {
-  static final FirebaseConfig firebase = FirebaseConfig();
+  static Never _fail(Object e, StackTrace st) {
+    ErrorService.recordError(e, st);
+    debugPrint('$e\n$st');
+    if (e is ApiException) throw e.message;
+    throw e.toString();
+  }
 
-  static Future<bool> checkProjectCodeExists({
-    required String code,
-    String? uid,
-  }) async {
+  static String? _d(DateTime? d) => d == null
+      ? null
+      : '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  static Map<String, dynamic> _body(ProjectModel p) => {
+    'project_name': p.projectName,
+    'project_code': p.projectCode ?? '',
+    'project_description': p.projectDescription,
+    'client_id': p.clientId ?? '',
+    'deal_id': p.dealId ?? '',
+    'category': p.category ?? '',
+    'project_owner': p.projectOwner,
+    'team_lead': p.teamLead,
+    'members': p.members,
+    'start_date': _d(p.startDate),
+    'end_date': _d(p.endDate),
+    'deadline': _d(p.deadline),
+    'tags': p.tags ?? '',
+  };
+
+  static Future<bool> checkProjectCodeExists({required String code, String? uid}) async {
     try {
-      var projectCode = code.trim();
-      if (projectCode.isEmpty) return false;
-
-      var cid = await Spdb.getCid();
-
-      var query = firebase.users
-          .doc(cid)
-          .collection(Collections.projects.name)
-          .where('projectCode', isEqualTo: projectCode);
-
-      if (uid != null && uid.isNotEmpty) {
-        query = query.where(FieldPath.documentId, isNotEqualTo: uid);
-      }
-
-      var snap = await query.get();
-
-      return snap.docs.isNotEmpty;
+      final c = code.trim().toLowerCase();
+      if (c.isEmpty) return false;
+      final all = await getAllProjects();
+      return all.any((p) => p.uid != uid && (p.projectCode ?? '').trim().toLowerCase() == c);
     } catch (e, st) {
-      debugPrint("$e\n$st");
-      rethrow;
+      ErrorService.recordError(e, st);
+      return false;
     }
   }
 
   static Future<void> createProject({required ProjectModel project}) async {
     try {
-      var cid = await Spdb.getCid();
-      var uid = await Spdb.getUid();
-
-      var projectDoc = await firebase.users
-          .doc(cid)
-          .collection(Collections.projects.name)
-          .add(project.toMap());
-
-      // Collect Users
-      List<String> users = [
-        ...project.members,
-        project.projectOwner,
-        project.teamLead,
-      ];
-
-      if (project.client != null && project.client!.isNotEmpty) {
-        users.add(project.client!);
-      }
-
-      users = users.toSet().toList();
-
-      List<String> toUids = List<String>.from(users);
-      List<String> fcmIds = [];
-
-      for (var i in users) {
-        fcmIds.addAll(await AuthService.getUserFcmIds(uid: i));
-      }
-
-      var user = await Spdb.getUser();
-
-      var notif = NotificationModel(
-        collectionId: await Spdb.getCid() ?? '',
-        title: 'Project : ${project.projectName}',
-        body: 'New project created by ${user.name}',
-        toFcms: fcmIds,
-        toUids: toUids,
-        senderId: await Spdb.getUid(),
-        type: NotificationType.project,
-        payload: {'projectId': projectDoc.id},
-      );
-
-      PostNotificationService.sendNotification(model: notif);
-
-      if (project.deadline != null) {
-        ReminderService.createReminder(
-          docId: projectDoc.id,
-          scheduledAt: project.deadline!,
-          notification: NotificationModel(
-            collectionId: cid ?? '',
-            title: 'Project Deadline Reminder',
-            body: 'Project "${project.projectName}" is due soon',
-            toFcms: fcmIds,
-            toUids: users,
-            type: NotificationType.project,
-            payload: {'projectId': projectDoc.id},
-          ),
-        );
-      }
+      (await ProjectsApiService.call('create', _body(project))).ensureSuccess();
+      ApiLive.changed('projects');
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error creating project: $e';
+      _fail(e, st);
     }
   }
 
-  static Future<void> editProject({
-    required String uid,
-    required ProjectModel project,
-  }) async {
+  static Future<void> editProject({required String uid, required ProjectModel project}) async {
     try {
-      var cid = await Spdb.getCid();
-
-      await CommonService.update(
-        '${Collections.users.name}/$cid/${Collections.projects.name}',
-        uid,
-        project.toUpdateMap(),
-        activity: '${project.projectName} has been updated',
-      );
-
-      // Collect Users
-      List<String> users = [
-        ...project.members,
-        project.projectOwner,
-        project.teamLead,
-      ];
-
-      if (project.client != null && project.client!.isNotEmpty) {
-        users.add(project.client!);
-      }
-
-      users = users.toSet().toList();
-
-      List<String> toUids = List<String>.from(users);
-      List<String> fcmIds = [];
-
-      for (var i in users) {
-        fcmIds.addAll(await AuthService.getUserFcmIds(uid: i));
-      }
-
-      var user = await Spdb.getUser();
-
-      var notif = NotificationModel(
-        collectionId: await Spdb.getCid() ?? '',
-        title: 'Project : ${project.projectName}',
-        body: 'Project has updated by ${user.name}',
-        toFcms: fcmIds,
-        toUids: toUids,
-        senderId: await Spdb.getUid(),
-        type: NotificationType.project,
-        payload: {'projectId': uid},
-      );
-
-      PostNotificationService.sendNotification(model: notif);
-
-      if (project.deadline != null) {
-        ReminderService.createReminder(
-          docId: uid,
-          scheduledAt: project.deadline!,
-          notification: NotificationModel(
-            collectionId: cid ?? '',
-            title: 'Project Deadline Reminder',
-            body: 'Project "${project.projectName}" is due soon',
-            toFcms: fcmIds,
-            toUids: users,
-            type: NotificationType.project,
-            payload: {'projectId': uid},
-          ),
-        );
-      }
+      (await ProjectsApiService.call('update', {'uid': uid, ..._body(project)})).ensureSuccess();
+      ApiLive.changed('projects');
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error updating project: $e';
+      _fail(e, st);
     }
   }
 
   static Future<ProjectModel> getProject({required String uid}) async {
     try {
-      var cid = await Spdb.getCid();
-      var projectDoc = await firebase.users
-          .doc(cid)
-          .collection(Collections.projects.name)
-          .doc(uid)
-          .get();
-
-      if (projectDoc.exists) {
-        var projectData = projectDoc.data();
-        if (projectData != null) {
-          var project = ProjectModel.fromMap(projectDoc.id, projectData);
-          return project;
-        } else {
-          throw 'Project data is empty';
-        }
-      } else {
-        throw 'Project not found';
-      }
+      final res = (await ProjectsApiService.call('get', {'uid': uid})).ensureSuccess();
+      return CrmMappers.project(res.dataMap);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error creating project: $e';
+      _fail(e, st);
     }
   }
 
   static Future<List<ProjectModel>> getAllProjects() async {
     try {
-      var cid = await Spdb.getCid();
-      var querySnapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.projects.name)
-          .get();
-
-      List<ProjectModel> projects = querySnapshot.docs.map((doc) {
-        return ProjectModel.fromMap(doc.id, doc.data());
-      }).toList();
-
-      projects.sort((a, b) => a.projectName.compareTo(b.projectName));
-
-      return projects;
+      final res = (await ProjectsApiService.call('list')).ensureSuccess();
+      return res.dataList.map((r) => CrmMappers.project(Js.m(r))).toList();
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("${e.toString()}, ${st.toString()}");
-      throw 'Error fetching projects: $e';
+      _fail(e, st);
     }
   }
 
-  static Future<bool> isProjectAssigned(String uid) async {
-    try {
-      var cid = await Spdb.getCid();
-
-      final snapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.tasks.name)
-          .where('project', isEqualTo: uid)
-          .limit(1)
-          .get();
-
-      return snapshot.docs.isNotEmpty;
-    } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("Error checking project assignment: $e\n$st");
-      return false;
-    }
-  }
+  /// The server blocks deletion while tasks/tickets reference the project
+  /// and returns the reason, so no pre-check is needed.
+  static Future<bool> isProjectAssigned(String uid) async => false;
 
   static Future<void> deleteProject({required String uid}) async {
     try {
-      var cid = await Spdb.getCid();
-
-      final docRef = await firebase.users
-          .doc(cid)
-          .collection(Collections.projects.name)
-          .doc(uid)
-          .get();
-
-      final data = docRef.data() as Map<String, dynamic>;
-
-      await TrashService.moveToTrash(
-        docRef: docRef.reference,
-        docData: data,
-        reason: 'user_deleted',
-      );
-
-      await docRef.reference.delete();
-      var user = await Spdb.getUser();
-      ActivityLogModel activityLogModel = ActivityLogModel(
-        userData: user,
-        activity: '${data['projectName'] ?? 'N/A'} has been deleted',
-        description:
-            'User has deleted an entry in ${Collections.projects.name}',
-        collection:
-            '${Collections.users.name}/$cid/${Collections.projects.name}',
-        docId: docRef.id,
-      );
-      await CommonService.add(
-        '${Collections.users.name}/$cid/${Collections.activityLogs.name}',
-        activityLogModel.toMap(),
-      );
+      (await ProjectsApiService.call('delete', {'uid': uid})).ensureSuccess();
+      ApiLive.changed({'projects', 'trash'});
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint("Error deleting project: $e\n$st");
-      throw 'Error deleting project: $e';
+      _fail(e, st);
     }
   }
 
   static Future<void> restoreProject(ProjectModel project) async {
-    var cid = await Spdb.getCid();
-
-    final uid = project.uid;
-    if (uid == null || uid.isEmpty) {
-      throw Exception("UID missing");
-    }
-
-    await firebase.users
-        .doc(cid)
-        .collection(Collections.projects.name)
-        .doc(uid)
-        .set(project.toMap());
+    throw 'Restoring a deleted project is not supported by the server yet.';
   }
 
   static Future<int> getUserProjectsCount({required String userId}) async {
-    try {
-      var cid = await Spdb.getCid();
-
-      var snapshot = await firebase.users
-          .doc(cid)
-          .collection(Collections.projects.name)
-          .where('members', arrayContains: userId)
-          .get();
-
-      return snapshot.docs.length;
-    } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      throw 'Error getting user project count: $e';
-    }
+    final all = await getAllProjects();
+    return all
+        .where((p) => p.projectOwner == userId || p.teamLead == userId || p.members.contains(userId))
+        .length;
   }
 }

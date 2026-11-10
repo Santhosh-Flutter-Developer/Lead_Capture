@@ -1,50 +1,46 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import '/constants/constants.dart';
 import '/services/services.dart';
 import '/models/models.dart';
 
+/// Project updations – backed by project_updations.php (no Firestore).
+/// `project_id` is the uid of the (completed) deal the updation belongs to.
 class ProjectUpdationService {
-  static final FirebaseConfig firebase = FirebaseConfig();
-
-  static Future<String> _collectionPath() async {
-    final cid = await Spdb.getCid();
-    return '${Collections.users.name}/$cid/${Collections.projectUpdations.name}';
+  static Never _fail(Object e, StackTrace st) {
+    ErrorService.recordError(e, st);
+    debugPrint('$e\n$st');
+    if (e is ApiException) throw e.message;
+    throw e.toString();
   }
 
-  /// Creates an updation and auto-generates its UPD-0001 style number.
-  static Future<String> createUpdation({
-    required ProjectUpdationModel updation,
-  }) async {
+  static String _d(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  static Map<String, dynamic> _body(ProjectUpdationModel u) => {
+    'project_id': u.projectId,
+    'project_name': u.projectName,
+    'client_id': u.clientId ?? '',
+    'company_name': u.companyName ?? '',
+    'contact_name': u.contactName ?? '',
+    'contact_mobile': u.contactMobile ?? '',
+    'title': u.title,
+    'description': u.description,
+    'requested_date': _d(u.requestedDate),
+    'status': u.status.name,
+    'value': u.value ?? 0,
+    'deadline': u.deadline == null ? null : _d(u.deadline!),
+    'assignee_id': u.assigneeId ?? u.followUp ?? '',
+    'assignee_name': u.assigneeName ?? '',
+    'notes': u.notes,
+    'attachment_ids': CrmMappers.attachmentIds(u.attachments),
+  };
+
+  static Future<String> createUpdation({required ProjectUpdationModel updation}) async {
     try {
-      final cid = await Spdb.getCid();
-      final ref = firebase.users
-          .doc(cid)
-          .collection(Collections.projectUpdations.name);
-
-      var number = 1;
-      final last = await ref
-          .orderBy('updationNumber', descending: true)
-          .limit(1)
-          .get();
-      if (last.docs.isNotEmpty) {
-        number = (parseFirestoreInt(last.docs.first.data()['updationNumber']) ??
-                0) +
-            1;
-      }
-
-      final model = updation.copyWith(updationNumber: number);
-      final doc = await CommonService.add(
-        await _collectionPath(),
-        model.toMap(),
-        activity:
-            '${model.updationCode} "${model.title}" has been added to ${model.projectName}',
-      );
-      return doc.id;
+      final res = (await ProjectUpdationsApiService.call('create', _body(updation))).ensureSuccess();
+      ApiLive.changed('updations');
+      return Js.s(res.dataMap['uid']);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      debugPrint('$e\n$st');
-      throw 'Error creating project updation: $e';
+      _fail(e, st);
     }
   }
 
@@ -53,99 +49,62 @@ class ProjectUpdationService {
     required ProjectUpdationModel updation,
   }) async {
     try {
-      await CommonService.update(
-        await _collectionPath(),
-        uid,
-        updation.toUpdateMap(),
-        activity: '${updation.updationCode} has been updated',
-      );
+      final current = await getUpdation(uid: uid);
+      final keep = updation.attachments.map((f) => ApiAttachments.idOf(f.url)).toSet();
+      for (final old in current.attachments) {
+        final id = ApiAttachments.idOf(old.url);
+        if (id != null && !keep.contains(id)) {
+          await ProjectUpdationsApiService.call('delete_attachment', {'id': id});
+        }
+      }
+      (await ProjectUpdationsApiService.call('update', {'uid': uid, ..._body(updation)})).ensureSuccess();
+      ApiLive.changed('updations');
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      throw 'Error updating project updation: $e';
+      _fail(e, st);
     }
   }
 
-  static Future<void> updateStatus({
-    required String uid,
-    required UpdationStatus status,
-  }) async {
+  static Future<void> updateStatus({required String uid, required UpdationStatus status}) async {
     try {
-      await CommonService.update(await _collectionPath(), uid, {
-        'status': status.name,
-        'updatedAt': DateTime.now().millisecondsSinceEpoch,
-      });
+      (await ProjectUpdationsApiService.call('update_status', {'uid': uid, 'status': status.name})).ensureSuccess();
+      ApiLive.changed('updations');
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      throw 'Error updating status: $e';
+      _fail(e, st);
     }
   }
 
   static Future<ProjectUpdationModel> getUpdation({required String uid}) async {
-    final cid = await Spdb.getCid();
-    final doc = await firebase.users
-        .doc(cid)
-        .collection(Collections.projectUpdations.name)
-        .doc(uid)
-        .get();
-    final data = doc.data();
-    if (!doc.exists || data == null) throw 'Project updation not found';
-    return ProjectUpdationModel.fromMap(doc.id, data);
+    try {
+      final res = (await ProjectUpdationsApiService.call('get', {'uid': uid})).ensureSuccess();
+      return CrmMappers.updation(res.dataMap);
+    } catch (e, st) {
+      _fail(e, st);
+    }
   }
 
-  static Future<List<ProjectUpdationModel>> getAllUpdations({
-    String? projectId,
-  }) async {
+  static Future<List<ProjectUpdationModel>> getAllUpdations({String? projectId}) async {
     try {
-      final cid = await Spdb.getCid();
-      Query<Map<String, dynamic>> query = firebase.users
-          .doc(cid)
-          .collection(Collections.projectUpdations.name);
-      if (projectId != null && projectId.isNotEmpty) {
-        query = query.where('projectId', isEqualTo: projectId);
-      }
-      final snap = await query.get();
-      final list = snap.docs
-          .map((d) => ProjectUpdationModel.fromMap(d.id, d.data()))
-          .toList();
-      list.sort(
-        (a, b) => (b.updationNumber ?? 0).compareTo(a.updationNumber ?? 0),
-      );
-      // Follow Up set -> only that employee + admins see the updation.
+      final res = (await ProjectUpdationsApiService.call('list', {
+        if (projectId != null && projectId.isNotEmpty) 'project_id': projectId,
+      })).ensureSuccess();
+      final list = res.dataList.map((r) => CrmMappers.updation(Js.m(r))).toList();
+      list.sort((a, b) => (b.updationNumber ?? 0).compareTo(a.updationNumber ?? 0));
       return FollowUpAccess.filterVisible(list, (u) => u.followUp);
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      throw 'Error fetching project updations: $e';
+      _fail(e, st);
     }
   }
 
   static Future<void> deleteUpdation({required String uid}) async {
     try {
-      final cid = await Spdb.getCid();
-      final docRef = firebase.users
-          .doc(cid)
-          .collection(Collections.projectUpdations.name)
-          .doc(uid);
-      final snap = await docRef.get();
-      final data = snap.data();
-      if (data == null) throw 'Project updation not found';
-      await TrashService.moveToTrash(
-        docRef: docRef,
-        docData: data,
-        reason: 'user_deleted',
-      );
-      await docRef.delete();
+      (await ProjectUpdationsApiService.call('delete', {'uid': uid})).ensureSuccess();
+      ApiLive.changed({'updations', 'trash'});
     } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      throw 'Error deleting project updation: $e';
+      _fail(e, st);
     }
   }
 
   static Future<void> restoreUpdation(ProjectUpdationModel updation) async {
-    final cid = await Spdb.getCid();
-    await firebase.users
-        .doc(cid)
-        .collection(Collections.projectUpdations.name)
-        .doc(updation.uid)
-        .set(updation.toMap());
+    throw 'Restoring a deleted updation is not supported by the server yet.';
   }
 }

@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:any_link_preview/any_link_preview.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:collection/collection.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;

@@ -1,7 +1,7 @@
 // ignore_for_file: public_member_api_docs, sort_constructors_first
 import 'dart:convert';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
+import '/models/src/timestamp.dart';
 
 class VersionModel {
   String? version;
@@ -56,7 +56,7 @@ class VersionModel {
       description: map['description'] != null
           ? map['description'] as String
           : null,
-      timestamp: (map['timestamp'] as Timestamp).toDate(),
+      timestamp: anyToDate(map['timestamp']),
       isUpdateNeed: map['isUpdateNeed'] != null
           ? map['isUpdateNeed'] as bool
           : false,
