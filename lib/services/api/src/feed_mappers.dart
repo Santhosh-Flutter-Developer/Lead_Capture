@@ -32,7 +32,7 @@ class FeedMappers {
         authorName: Js.s(m['user_name']),
         authorAvatar: _avatar(m['user_photo']),
         content: Js.s(m['comment']),
-        createdAt: Js.dt(m['created_at']) ?? DateTime.now(),
+        createdAt: Js.dtUtc(m['created_at']) ?? DateTime.now(),
       );
 
   static PollModel? _poll(dynamic v) {
@@ -68,8 +68,8 @@ class FeedMappers {
       authorName: Js.s(m['created_by_name']),
       authorAvatar: _avatar(m['created_by_photo']),
       content: Js.s(m['content']),
-      createdAt: Js.dt(m['created_at']),
-      updatedAt: Js.dt(m['updated_at']),
+      createdAt: Js.dtUtc(m['created_at']),
+      updatedAt: Js.dtUtc(m['updated_at']),
       mediaImages: Js.mapList(m['media_images']).map(_file).toList(),
       attachments: Js.mapList(m['file_attachments']).map(_file).toList(),
       taggedUsers: const [],

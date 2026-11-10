@@ -28,7 +28,7 @@ class ApiClient {
   // Rate-limit protection: the server/CDN answers 429 when too many requests
   // arrive at once (the app fires dozens on startup). We cap concurrency,
   // share identical in-flight read requests, and retry 429 with backoff.
-  static const int _maxConcurrent = 4;
+  static const int _maxConcurrent = 3;
   static const int _max429Retries = 4;
   int _running = 0;
   final List<Completer<void>> _waiting = [];
@@ -109,6 +109,7 @@ class ApiClient {
           body: jsonEncode(payload),
         ),
         timeout: ApiConfig.receiveTimeout,
+        retryNetwork: isRead,
       ),
     );
   }
@@ -127,6 +128,7 @@ class ApiClient {
       () => _send(
         () async => _http.get(_uri(endpoint, q), headers: await _headers(json: false, auth: auth)),
         timeout: ApiConfig.receiveTimeout,
+        retryNetwork: true,
       ),
     );
   }
@@ -170,6 +172,7 @@ class ApiClient {
   Future<ApiResponse> _send(
     Future<http.Response> Function() call, {
     required Duration timeout,
+    bool retryNetwork = false,
   }) async {
     try {
       http.Response res;
@@ -178,6 +181,14 @@ class ApiClient {
         await _acquire();
         try {
           res = await call().timeout(timeout);
+        } on http.ClientException {
+          // In the browser a CDN rate-limit (429) reply has no CORS headers, so
+          // it surfaces as a network error instead of a status code. Safe to
+          // retry for read requests only.
+          if (!retryNetwork || attempt >= _max429Retries) rethrow;
+          attempt++;
+          await Future<void>.delayed(Duration(milliseconds: 800 * (1 << (attempt - 1))));
+          continue;
         } finally {
           _release();
         }

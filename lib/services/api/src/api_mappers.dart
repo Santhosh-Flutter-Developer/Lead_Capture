@@ -29,6 +29,17 @@ class Js {
     return DateTime.tryParse(t.replaceFirst(' ', 'T'));
   }
 
+  /// Server-generated timestamps written by MySQL `NOW()` (server/DB clock is
+  /// UTC and the string carries no zone). Parse as UTC, show in local time.
+  static DateTime? dtUtc(dynamic v) {
+    final t = s(v).trim();
+    if (t.isEmpty || t.startsWith('0000')) return null;
+    var x = t.replaceFirst(' ', 'T');
+    final hasZone = x.endsWith('Z') || RegExp(r'[+-]\d{2}:?\d{2}$').hasMatch(x);
+    if (!hasZone) x = '${x}Z';
+    return DateTime.tryParse(x)?.toLocal();
+  }
+
   static Map<String, dynamic> m(dynamic v) => v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{};
 
   /// Accepts a real list, a JSON-encoded list string (`'["a","b"]'`),
