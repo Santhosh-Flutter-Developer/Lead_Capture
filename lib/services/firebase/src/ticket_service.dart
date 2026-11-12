@@ -119,12 +119,12 @@ class TicketService {
   static Stream<List<TaskTimeLogModel>> streamTimeLogs({
     required String cid,
     required String ticketId,
-  }) => Stream.value(<TaskTimeLogModel>[]);
+  }) => ApiLive.value(<TaskTimeLogModel>[]);
 
   static Stream<List<TicketHistoryModel>> streamTicketHistory({
     required String cid,
     required String ticketId,
-  }) => Stream.value(<TicketHistoryModel>[]);
+  }) => ApiLive.value(<TicketHistoryModel>[]);
 
   static Stream<List<TicketCommentModel>> streamComments({
     required String cid,

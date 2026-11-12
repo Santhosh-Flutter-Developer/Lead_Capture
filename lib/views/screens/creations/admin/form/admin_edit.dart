@@ -414,12 +414,14 @@ class _AdminUpdateState extends State<AdminUpdate> {
           child: FormFields(
             label: "Password",
             controller: _passwordController,
-            isRequired: true,
+            hintText: 'Leave blank to keep current password',
+            isRequired: false,
             obsecureText: !_passwordVisible,
             prefixIcon: const Icon(Iconsax.lock, size: 18),
+            // Optional on update: only validate when a new password is typed.
             valid: (value) {
-              if (value == null || value.trim().isEmpty) {
-                return "Password is required";
+              if (value == null || value.isEmpty) {
+                return null;
               }
               if (value.length < 6) {
                 return "Password must be at least 6 characters";

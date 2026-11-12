@@ -152,7 +152,11 @@ class FeedService {
     required CommentModel comment,
   }) async {
     try {
-      (await FeedApiService.addComment(feedUid: feedId, comment: comment.content))
+      (await FeedApiService.addComment(
+        feedUid: feedId,
+        comment: comment.content,
+        replyToCommentId: comment.replyToCommentId,
+      ))
           .ensureSuccess();
       ApiLive.changed({'feed'});
       final res = (await FeedApiService.comments(feedId)).ensureSuccess();
@@ -187,11 +191,31 @@ class FeedService {
     required String feedId,
     required String commentId,
     required String content,
-  }) async => _unsupported('Editing comments');
+  }) async {
+    try {
+      final id = int.tryParse(commentId);
+      if (id == null) throw 'Comment is not saved yet, refresh and try again.';
+      (await FeedApiService.editComment(commentId: id, comment: content)).ensureSuccess();
+      ApiLive.changed({'feed'});
+    } catch (e) {
+      throw 'Error editing comment: ${_msg(e)}';
+    }
+  }
 
+  /// The server toggles [emoji] for the current user; [reactions] is the
+  /// optimistic state already applied in the UI and is not sent.
   static Future<void> updateCommentReaction({
     required String feedId,
     required String commentId,
     required Map<String, List<String>> reactions,
-  }) async => _unsupported('Comment reactions');
+    String emoji = '❤️',
+  }) async {
+    try {
+      final id = int.tryParse(commentId);
+      if (id == null) throw 'Comment is not saved yet, refresh and try again.';
+      (await FeedApiService.toggleCommentReaction(commentId: id, emoji: emoji)).ensureSuccess();
+    } catch (e) {
+      throw 'Error updating reaction: ${_msg(e)}';
+    }
+  }
 }

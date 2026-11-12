@@ -1562,8 +1562,24 @@ class _DealsViewState extends State<DealsView> with TickerProviderStateMixin {
                           fontWeight: FontWeight.w500,
                         ),
                       ),
-                      InkWell(
+                      Builder(
+                        builder: (btnContext) => InkWell(
                         onTap: () {
+                          // Open the menu next to the tapped icon (not a fixed point).
+                          final button = btnContext.findRenderObject() as RenderBox;
+                          final overlay = Overlay.of(btnContext)
+                              .context
+                              .findRenderObject() as RenderBox;
+                          final menuPosition = RelativeRect.fromRect(
+                            Rect.fromPoints(
+                              button.localToGlobal(Offset.zero, ancestor: overlay),
+                              button.localToGlobal(
+                                button.size.bottomRight(Offset.zero),
+                                ancestor: overlay,
+                              ),
+                            ),
+                            Offset.zero & overlay.size,
+                          );
                           showMenu(
                             context: context,
                             color: Theme.of(
@@ -1572,12 +1588,7 @@ class _DealsViewState extends State<DealsView> with TickerProviderStateMixin {
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8),
                             ),
-                            position: const RelativeRect.fromLTRB(
-                              100,
-                              100,
-                              0,
-                              0,
-                            ),
+                            position: menuPosition,
                             items: [
                               PopupMenuItem(
                                 value: 'edit',
@@ -1617,6 +1628,7 @@ class _DealsViewState extends State<DealsView> with TickerProviderStateMixin {
                           color: Theme.of(context).colorScheme.primary,
                           size: 16,
                         ),
+                      ),
                       ),
                     ],
                   ),

@@ -185,7 +185,7 @@ class TaskService {
   static Stream<List<TaskHistoryModel>> streamTaskHistory({
     required String cid,
     required String taskId,
-  }) => Stream.value(<TaskHistoryModel>[]);
+  }) => ApiLive.value(<TaskHistoryModel>[]);
 
   static Stream<List<TaskCommentModel>> streamComments({
     required String cid,

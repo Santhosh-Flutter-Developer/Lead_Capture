@@ -222,9 +222,10 @@ class CommentSheetState extends State<CommentSheet> {
         feedId: widget.feedId,
         commentId: comment.commentId,
         reactions: reactions,
+        emoji: emoji,
       );
     } catch (e) {
-      // Not supported by the server: roll back the optimistic change.
+      // Roll back the optimistic change.
       if (!mounted) return;
       setState(() {
         final index = _comments.indexWhere(

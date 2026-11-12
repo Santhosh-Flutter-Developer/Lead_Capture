@@ -1093,11 +1093,13 @@ _scrollController.dispose();
           child: FormFields(
             label: 'Password',
             controller: _passwordController,
-            hintText: 'Enter Password',
-            isRequired: true,
+            hintText: 'Leave blank to keep current password',
+            isRequired: false,
             prefixIcon: const Icon(Iconsax.lock, size: 18),
-            valid: (input) =>
-                Validation.passwordValidation(input: input, isReq: true),
+            // Optional on update: only validate when a new password is typed.
+            valid: (input) => (input == null || input.isEmpty)
+                ? null
+                : Validation.passwordValidation(input: input, isReq: false),
             obsecureText: !_passwordVisible,
             suffixIcon: IconButton(
               onPressed: () => setState(() {

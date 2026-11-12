@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '/models/models.dart';
 import 'api_config.dart';
 import 'api_mappers.dart';
@@ -32,8 +34,22 @@ class FeedMappers {
         authorName: Js.s(m['user_name']),
         authorAvatar: _avatar(m['user_photo']),
         content: Js.s(m['comment']),
+        replyToCommentId: Js.opt(m['reply_to_comment_id']),
+        reactions: _reactions(m['reactions']),
         createdAt: Js.dtUtc(m['created_at']) ?? DateTime.now(),
       );
+
+  /// `{"❤️": ["uid", ...]}` (empty list / null when no reactions).
+  static Map<String, List<String>> _reactions(dynamic v) {
+    var x = v;
+    if (x is String && x.trim().startsWith('{')) {
+      try {
+        x = jsonDecode(x);
+      } catch (_) {}
+    }
+    if (x is! Map) return {};
+    return x.map((k, val) => MapEntry(k.toString(), Js.strList(val)));
+  }
 
   static PollModel? _poll(dynamic v) {
     if (v is! Map) return null;

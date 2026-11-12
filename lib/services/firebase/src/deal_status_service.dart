@@ -21,9 +21,21 @@ class DealStatusService {
 
   static Map<String, dynamic> _body(DealStatusModel m) => {'name': m.name, 'description': m.description, 'color': ApiMappers.colorToServer(m.color), 'order_index': m.orderNumber, 'is_final': m.isFinal ? 1 : 0, 'is_move_to_deal': m.isMoveToDeal ? 1 : 0};
 
+  static Future<int> _nextOrder() async {
+    var max = 0;
+    for (final r in await _rows()) {
+      final o = Js.i(r['order_index']) ?? 0;
+      if (o > max) max = o;
+    }
+    return max + 1;
+  }
+
   static Future<void> createDealStatus({required DealStatusModel dealStatus}) async {
     try {
-      (await MastersApiService.create(_type, _body(dealStatus))).ensureSuccess();
+      final body = _body(dealStatus);
+      // order_index is assigned here (max + 1), as the old Firestore code did.
+      body['order_index'] = await _nextOrder();
+      (await MastersApiService.create(_type, body)).ensureSuccess();
       ApiLive.changed(_type);
     } catch (e, st) {
       _fail(e, st);
@@ -35,7 +47,17 @@ class DealStatusService {
     required DealStatusModel dealStatus,
   }) async {
     try {
-      (await MastersApiService.update(_type, uid, _body(dealStatus))).ensureSuccess();
+      final body = _body(dealStatus);
+      if ((dealStatus.orderNumber) <= 0) {
+        // Edit forms don't carry the order: keep the stored one.
+        for (final r in await _rows()) {
+          if (Js.s(r['uid']) == uid) {
+            body['order_index'] = Js.i(r['order_index']) ?? 0;
+            break;
+          }
+        }
+      }
+      (await MastersApiService.update(_type, uid, body)).ensureSuccess();
       ApiLive.changed(_type);
     } catch (e, st) {
       _fail(e, st);

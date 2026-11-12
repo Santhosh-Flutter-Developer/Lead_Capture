@@ -187,7 +187,7 @@ class ChatService {
     required String chatId,
     required String parentMessageId,
   }) =>
-      Stream.value(<MessagesModel>[]);
+      ApiLive.value(<MessagesModel>[]);
 
   static Future<List<MessagesModel>> getChatMessages({required String uid}) =>
       _fetchMessages(uid);

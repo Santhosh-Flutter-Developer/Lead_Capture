@@ -18,6 +18,14 @@ class ApiLive {
     }
   }
 
+  /// A constant stream that can be listened to any number of times (plain
+  /// `Stream.value` is single-subscription and throws "Bad state: Stream has
+  /// already been listened to" when a screen rebuilds and listens again).
+  static Stream<T> value<T>(T v) => Stream<T>.multi((c) {
+        c.add(v);
+        c.close();
+      }, isBroadcast: true);
+
   /// Emits [fetch]() now, again on every [changed] of one of [keys], and
   /// every [interval]. Errors are forwarded to the stream (so BLoC onError
   /// still works); polling continues after an error.
@@ -27,6 +35,8 @@ class ApiLive {
     Duration interval = const Duration(seconds: 30),
   }) {
     late StreamController<T> ctrl;
+    T? last;
+    var hasLast = false;
     StreamSubscription<String>? sub;
     Timer? timer;
     var running = false;
@@ -44,7 +54,11 @@ class ApiLive {
           again = false;
           try {
             final v = await fetch();
-            if (!ctrl.isClosed) ctrl.add(v);
+            if (!ctrl.isClosed) {
+              last = v;
+              hasLast = true;
+              ctrl.add(v);
+            }
           } catch (e, st) {
             if (!ctrl.isClosed) ctrl.addError(e, st);
           }
@@ -54,7 +68,10 @@ class ApiLive {
       }
     }
 
-    ctrl = StreamController<T>(
+    // Broadcast + replay of the latest value: a screen can rebuild and listen
+    // to the same stream again (a plain stream throws "Bad state: Stream has
+    // already been listened to") and must still get the current data at once.
+    ctrl = StreamController<T>.broadcast(
       onListen: () {
         run();
         sub = _bus.stream.where(keys.contains).listen((_) => run());
@@ -65,6 +82,10 @@ class ApiLive {
         await sub?.cancel();
       },
     );
-    return ctrl.stream;
+    return Stream<T>.multi((c) {
+      if (hasLast) c.add(last as T);
+      final s = ctrl.stream.listen(c.add, onError: c.addError, onDone: c.close);
+      c.onCancel = s.cancel;
+    }, isBroadcast: true);
   }
 }
