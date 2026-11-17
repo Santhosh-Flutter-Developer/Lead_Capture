@@ -10,7 +10,7 @@ class AttachmentIntake {
   AttachmentIntake._();
 
   /// Web keeps the whole file in memory, so stay reasonable there.
-  static const int maxWebBytes = 100 * 1024 * 1024;
+  static const int maxWebBytes = ApiConfig.maxUploadBytes; // 30 MB server limit
 
   static const String _tempFolder = 'chat_attachments';
   static int _seq = 0;
@@ -194,6 +194,12 @@ class AttachmentIntake {
       await sink.flush();
     } finally {
       await sink.close();
+    }
+    if (size > maxWebBytes) {
+      try {
+        await tmp.delete();
+      } catch (_) {}
+      throw const AttachmentTooLarge();
     }
     if (size == 0) {
       // Folders / empty items end up here.

@@ -14,7 +14,10 @@ class TaskService {
     throw e.toString();
   }
 
-  static Map<String, dynamic> _body(TaskModel t) => {
+  /// [create] sends the initial status (a new task starts as `pending`).
+  /// On update the status is NOT sent, so editing a task never changes its
+  /// status (status changes go through update_status only).
+  static Map<String, dynamic> _body(TaskModel t, {bool create = false}) => {
     'task_name': t.taskName,
     'description': t.description,
     'deadline': t.deadline?.toIso8601String(),
@@ -27,13 +30,16 @@ class TaskService {
     'tags': t.tags,
     'reminder': t.reminder?.toIso8601String(),
     'project': t.project ?? '',
-    'status': t.status ?? 'started',
+    if (create) 'status': t.status ?? 'pending',
+    'lead': t.lead ?? '',
+    'sub_task_of': t.subTaskOf ?? '',
+    if (t.createdBy.isNotEmpty) 'created_by': t.createdBy.first,
     'attachment_ids': CrmMappers.attachmentIds(t.attachments),
   };
 
   static Future<void> createTask({required TaskModel task}) async {
     try {
-      (await TasksApiService.call('create', _body(task))).ensureSuccess();
+      (await TasksApiService.call('create', _body(task, create: true))).ensureSuccess();
       ApiLive.changed('tasks');
     } catch (e, st) {
       _fail(e, st);
@@ -181,11 +187,16 @@ class TaskService {
     return l;
   });
 
-  /// tasks.php keeps no per-task history table.
+  /// History = tasks.php `get` -> activity_history (activity log entries that
+  /// mention this task: created / updated / status changes).
   static Stream<List<TaskHistoryModel>> streamTaskHistory({
     required String cid,
     required String taskId,
-  }) => ApiLive.value(<TaskHistoryModel>[]);
+  }) => ApiLive.watch({'task_$taskId'}, () async {
+    final l = Js.mapList((await _detail(taskId))['activity_history']).map(CrmMappers.taskHistory).toList();
+    l.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    return l;
+  });
 
   static Stream<List<TaskCommentModel>> streamComments({
     required String cid,
@@ -196,8 +207,13 @@ class TaskService {
     return l;
   });
 
-  static Future<List<TaskHistoryModel>> getTaskHistory({required String taskId}) async =>
-      <TaskHistoryModel>[];
+  static Future<List<TaskHistoryModel>> getTaskHistory({required String taskId}) async {
+    try {
+      return Js.mapList((await _detail(taskId))['activity_history']).map(CrmMappers.taskHistory).toList();
+    } catch (e, st) {
+      _fail(e, st);
+    }
+  }
 
   static Future<List<TaskCommentModel>> getComments({required String taskId}) async {
     try {

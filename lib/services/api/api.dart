@@ -23,6 +23,7 @@ export 'src/chats_api_service.dart';
 export 'src/feed_api_service.dart';
 export 'src/settings_api_service.dart';
 export 'src/calendar_api_service.dart';
+export 'src/downloads_api_service.dart';
 export 'src/api_live.dart';
 export 'src/api_attachments.dart';
 export 'src/api_mappers.dart';

@@ -23,6 +23,7 @@ class ApiEndpoints {
   static const settings = 'settings.php';
   static const locations = 'locations.php';
   static const calendar = 'calendar.php';
+  static const downloads = 'downloads.php';
 }
 
 /// `type` values accepted by masters.php.

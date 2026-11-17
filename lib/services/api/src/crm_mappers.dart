@@ -11,7 +11,12 @@ class CrmMappers {
   CrmMappers._();
 
   static FileModel file(Map<String, dynamic> a) {
-    final url = ApiConfig.resolveFileUrl(Js.s(a['file_path'] ?? a['file_url'] ?? a['url']));
+    // Prefer the server-resolved `file_url` (an absolute Cloudflare R2 URL for new
+    // uploads); fall back to `file_path` (relative path / legacy upload).
+    final rawUrl = [a['file_url'], a['file_path'], a['url']]
+        .map(Js.s)
+        .firstWhere((v) => v.isNotEmpty, orElse: () => '');
+    final url = ApiConfig.resolveFileUrl(rawUrl);
     ApiAttachments.register(url, Js.i(a['id']));
     final ext = Js.s(a['file_extension'] ?? a['extension']);
     return FileModel(
@@ -269,7 +274,15 @@ class CrmMappers {
       tags: Js.strList(m['tags_list'] ?? m['tags']),
       reminder: Js.dt(m['reminder']),
       project: Js.opt(m['project']),
-      hasStarted: Js.b(m['has_started']),
+      lead: Js.opt(m['lead']),
+      subTaskOf: Js.opt(m['sub_task_of']),
+      // tasks.php stores has_started = 0 for On Hold (it only sets 1 for
+      // started / inProgress / completed), which made held tasks reload as
+      // "Pending". A task that has a started time or an active status is started.
+      hasStarted: Js.b(m['has_started']) ||
+          const {'started', 'inprogress', 'onhold'}
+              .contains(Js.s(m['status']).replaceAll(RegExp(r'[\s_-]'), '').toLowerCase()) ||
+          (Js.dt(m['started_time']) != null && !Js.b(m['completed']) && status == null),
       startedTime: Js.dt(m['started_time']),
       status: status,
       completed: Js.b(m['completed']),
@@ -291,10 +304,37 @@ class CrmMappers {
         timestamp: Js.dt(m['created_at']),
       );
 
-  static TaskTimeLogModel taskTimeLog(Map<String, dynamic> m) => TaskTimeLogModel(
+  /// Handles both shapes the server sends: raw time-log rows (`start_time` /
+  /// `end_time` in epoch ms, end null while open) and the computed `sessions`
+  /// of tasks.php / tickets.php (`start_ms` / `end_ms`, `live: true` while the
+  /// timer is running; its end_ms is just "now", so it is treated as open).
+  static TaskTimeLogModel taskTimeLog(Map<String, dynamic> m) {
+    final live = Js.b(m['live']);
+    return TaskTimeLogModel(
+      userId: Js.s(m['user_uid']),
+      startTime:
+          _ts(m['start_ms'] ?? m['start_time'] ?? m['started_at'] ?? m['start']) ??
+              DateTime.now(),
+      endTime: live
+          ? null
+          : _ts(m['end_ms'] ?? m['end_time'] ?? m['ended_at'] ?? m['end']),
+    );
+  }
+
+  /// activity_history rows (activity_logs joined with the user) of
+  /// tasks.php / tickets.php `get`.
+  static TaskHistoryModel taskHistory(Map<String, dynamic> m) => TaskHistoryModel(
         userId: Js.s(m['user_uid']),
-        startTime: _ts(m['start_time'] ?? m['started_at'] ?? m['start']) ?? DateTime.now(),
-        endTime: _ts(m['end_time'] ?? m['ended_at'] ?? m['end']),
+        updateDisposition: Js.s(m['action']),
+        update: Js.opt(m['details'] ?? m['description']),
+        timestamp: Js.dt(m['date_time'] ?? m['created_at']),
+      );
+
+  static TicketHistoryModel ticketHistory(Map<String, dynamic> m) => TicketHistoryModel(
+        userId: Js.s(m['user_uid']),
+        updateDisposition: Js.s(m['action']),
+        update: Js.opt(m['details'] ?? m['description']),
+        timestamp: Js.dt(m['date_time'] ?? m['created_at']),
       );
 
   static T _enumByName<T extends Enum>(List<T> values, dynamic v, T fallback, [String Function(T)? label]) {
@@ -354,6 +394,8 @@ class CrmMappers {
         projectDescription: Js.s(m['project_description']),
         projectOwner: Js.s(m['project_owner']),
         teamLead: Js.s(m['team_lead']),
+        projectOwnerName: Js.s(m['owner_name']),
+        teamLeadName: Js.s(m['lead_name']),
         members: Js.strList(m['members_list'] ?? m['members']),
         client: Js.opt(m['client_name']),
         clientId: Js.opt(m['client_id']),

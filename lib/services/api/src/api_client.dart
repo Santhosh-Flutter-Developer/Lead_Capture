@@ -232,6 +232,7 @@ class ApiClient {
     } catch (_) {}
 
     if (code == 401 || code == 403) {
+      // forceLogout ignores this when there is no session token any more.
       SessionManager.onUnauthorized?.call();
       throw ApiException(
         (json?['message'] ?? 'Session expired. Please log in again.').toString(),

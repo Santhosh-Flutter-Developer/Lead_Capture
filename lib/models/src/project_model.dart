@@ -8,6 +8,10 @@ class ProjectModel {
   final String projectDescription;
   final String projectOwner;
   final String teamLead;
+  /// Display names sent by the server (owner_name / lead_name) so lists don't
+  /// depend on the local user cache. Not persisted.
+  final String projectOwnerName;
+  final String teamLeadName;
   final List<String> members;
   final String? client;
   final String? clientId; // Master Client
@@ -27,6 +31,8 @@ class ProjectModel {
     required this.projectDescription,
     required this.projectOwner,
     required this.teamLead,
+    this.projectOwnerName = '',
+    this.teamLeadName = '',
     required this.members,
     this.client,
     this.clientId,
@@ -49,6 +55,8 @@ class ProjectModel {
     String? projectDescription,
     String? projectOwner,
     String? teamLead,
+    String? projectOwnerName,
+    String? teamLeadName,
     List<String>? members,
     String? client,
     String? clientId,
@@ -69,6 +77,8 @@ class ProjectModel {
       projectDescription: projectDescription ?? this.projectDescription,
       projectOwner: projectOwner ?? this.projectOwner,
       teamLead: teamLead ?? this.teamLead,
+      projectOwnerName: projectOwnerName ?? this.projectOwnerName,
+      teamLeadName: teamLeadName ?? this.teamLeadName,
       members: members ?? this.members,
       client: client ?? this.client,
       clientId: clientId ?? this.clientId,

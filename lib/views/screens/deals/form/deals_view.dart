@@ -403,12 +403,18 @@ class _DealsViewState extends State<DealsView> with TickerProviderStateMixin {
                         onPressed: () async {
                           final value = controller.text.trim();
                           if (value.isNotEmpty) {
-                            await DealService.editDealComment(
+                            try {
+                              await DealService.editDealComment(
                               dealUid: _deal.uid ?? '',
                               commentUid: comment.uid ?? '',
                               commentText: value,
                             );
                             Navigator.pop(context);
+                            } catch (e) {
+                              Navigator.pop(context);
+                              if (!mounted) return;
+                              FlushBar.show(this.context, e.toString(), isSuccess: false);
+                            }
                           }
                         },
                         style: ElevatedButton.styleFrom(

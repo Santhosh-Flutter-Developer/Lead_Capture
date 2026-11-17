@@ -36,7 +36,7 @@ class FeedMappers {
         content: Js.s(m['comment']),
         replyToCommentId: Js.opt(m['reply_to_comment_id']),
         reactions: _reactions(m['reactions']),
-        createdAt: Js.dtUtc(m['created_at']) ?? DateTime.now(),
+        createdAt: Js.dt(m['created_at']) ?? DateTime.now(),
       );
 
   /// `{"❤️": ["uid", ...]}` (empty list / null when no reactions).
@@ -84,8 +84,8 @@ class FeedMappers {
       authorName: Js.s(m['created_by_name']),
       authorAvatar: _avatar(m['created_by_photo']),
       content: Js.s(m['content']),
-      createdAt: Js.dtUtc(m['created_at']),
-      updatedAt: Js.dtUtc(m['updated_at']),
+      createdAt: Js.dt(m['created_at']),
+      updatedAt: Js.dt(m['updated_at']),
       mediaImages: Js.mapList(m['media_images']).map(_file).toList(),
       attachments: Js.mapList(m['file_attachments']).map(_file).toList(),
       taggedUsers: const [],

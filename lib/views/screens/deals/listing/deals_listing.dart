@@ -312,6 +312,12 @@ class _DealsListingViewState extends State<DealsListingView> {
                       _buildFilterRow(onSearchChanged: controllerRead.setSearch),
                       const SizedBox(height: 12),
                       _buildActionRow(context),
+                      if (_selectedView == 'List' &&
+                          _canDelete &&
+                          controllerWatch.selectedIds.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        _buildSelectionBar(controllerWatch, controllerRead),
+                      ],
                       const SizedBox(height: 18),
                       if (controllerWatch.paginatedItems.isEmpty)
                         const NoData(text: "No matching records found")
@@ -415,7 +421,13 @@ class _DealsListingViewState extends State<DealsListingView> {
                   child: ConstrainedBox(
                     constraints: BoxConstraints(minWidth: constraints.maxWidth),
                     child: DataTable(
-                      showCheckboxColumn: true,
+                      showCheckboxColumn: _canDelete,
+                      onSelectAll: _canDelete
+                          ? (selected) => _setPageSelection(
+                              controllerRead,
+                              selected ?? false,
+                            )
+                          : null,
                       columnSpacing: 12,
                       horizontalMargin: 8,
                       sortColumnIndex: controllerWatch.sortColumnIndex,
@@ -1363,15 +1375,18 @@ class _DealsListingViewState extends State<DealsListingView> {
 
     return DataRow(
       selected: isSelected,
-      onSelectChanged: (selected) {
-        controllerRead.onSelected(deal.uid ?? '', selected);
-        if (selected ?? false) {
-          _selectedDeals.add(deal);
-        } else {
-          _selectedDeals.remove(deal);
-        }
-        setState(() {});
-      },
+      // A locked deal cannot be deleted, so it cannot be selected.
+      onSelectChanged: (_canDelete && !deal.isLocked)
+          ? (selected) {
+              controllerRead.onSelected(deal.uid ?? '', selected);
+              if (selected ?? false) {
+                _selectedDeals.add(deal);
+              } else {
+                _selectedDeals.remove(deal);
+              }
+              setState(() {});
+            }
+          : null,
       cells: [
         /// Deal Number
         dataCell(
@@ -1465,11 +1480,168 @@ class _DealsListingViewState extends State<DealsListingView> {
                     }
                   },
                 ),
+              // Role based: only users with Delete permission; locked deals can't be deleted.
+              if (!deal.isLocked && (permissions?.canDelete ?? false))
+                IconButton(
+                  icon: const Icon(Iconsax.trash),
+                  tooltip: 'Delete Deal',
+                  color: AppColors.danger,
+                  splashRadius: 20,
+                  onPressed: () => _onDeleteDealTap(deal),
+                ),
             ],
           ),
         ),
       ],
     );
+  }
+
+  bool get _canDelete => permissions?.canDelete ?? false;
+
+  /// Header checkbox: select / deselect every deletable row on this page.
+  void _setPageSelection(
+    PaginatedDataController<DealModel> controller,
+    bool select,
+  ) {
+    final ids = controller.paginatedItems
+        .where((d) => !d.isLocked)
+        .map((d) => d.uid ?? '')
+        .where((id) => id.isNotEmpty);
+    if (select) {
+      controller.selectAll(ids);
+    } else {
+      controller.deselectAll(ids);
+    }
+  }
+
+  List<DealModel> _selectedDealModels(
+    PaginatedDataController<DealModel> controller,
+  ) => _filteredDeals
+      .where((d) => !d.isLocked && controller.selectedIds.contains(d.uid))
+      .toList();
+
+  /// deals.php has no bulk_delete, so each selected deal is deleted in turn.
+  /// Failed ones (e.g. linked to a project) stay selected for a retry.
+  Future<void> _bulkDelete(PaginatedDataController<DealModel> controller) async {
+    final selected = _selectedDealModels(controller);
+    if (selected.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => ConfirmDialog(
+        title: 'Delete Deals',
+        content: 'Are you sure you want to delete ${selected.length} deal(s)?',
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    futureLoading(context);
+    final deleted = <DealModel>[];
+    final failed = <String>[];
+    for (final d in selected) {
+      try {
+        await DealService.deleteDeal(uid: d.uid ?? '');
+        deleted.add(d);
+      } catch (e, st) {
+        await ErrorService.recordError(e, st);
+        failed.add('#${d.dealNumber ?? ''}: $e');
+      }
+    }
+    if (!mounted) return;
+    if (Navigator.canPop(context)) Navigator.pop(context); // close loading
+
+    controller.deselectAll(deleted.map((d) => d.uid ?? ''));
+    _selectedDeals.removeWhere((d) => deleted.contains(d));
+    if (deleted.isNotEmpty) context.read<DealBloc>().add(StreamDeals());
+
+    if (failed.isEmpty) {
+      FlushBar.show(context, '${deleted.length} deal(s) deleted successfully',
+          isSuccess: true);
+    } else {
+      FlushBar.show(
+        context,
+        '${deleted.length} deleted, ${failed.length} failed. ${failed.first}',
+        isSuccess: false,
+      );
+    }
+  }
+
+  Widget _buildSelectionBar(
+    PaginatedDataController<DealModel> controllerWatch,
+    PaginatedDataController<DealModel> controllerRead,
+  ) {
+    final scheme = Theme.of(context).colorScheme;
+    final selectedCount = _selectedDealModels(controllerWatch).length;
+    final total = _filteredDeals.where((d) => !d.isLocked).length;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: scheme.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.primary.withValues(alpha: 0.25)),
+      ),
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text(
+            '$selectedCount of $total selected',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+              color: scheme.primary,
+            ),
+          ),
+          if (selectedCount < total)
+            TextButton(
+              onPressed: () => controllerRead.selectAll(
+                _filteredDeals
+                    .where((d) => !d.isLocked)
+                    .map((d) => d.uid ?? ''),
+              ),
+              child: Text('Select all $total'),
+            ),
+          TextButton(
+            onPressed: controllerRead.clearSelection,
+            child: const Text('Clear'),
+          ),
+          ElevatedButton.icon(
+            onPressed: selectedCount == 0 ? null : () => _bulkDelete(controllerRead),
+            icon: const Icon(Iconsax.trash, size: 18),
+            label: Text('Delete ($selectedCount)'),
+            style: ElevatedButton.styleFrom(
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              backgroundColor: scheme.error,
+              foregroundColor: scheme.onError,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _onDeleteDealTap(DealModel deal) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => const ConfirmDialog(
+        title: 'Delete Deal',
+        content: 'Are you sure you want to delete this deal?',
+      ),
+    );
+    if (result != true || !mounted) return;
+    try {
+      await DealService.deleteDeal(uid: deal.uid ?? '');
+      if (!mounted) return;
+      FlushBar.show(context, 'Deal deleted successfully', isSuccess: true);
+      context.read<DealBloc>().add(StreamDeals());
+    } catch (e, st) {
+      await ErrorService.recordError(e, st);
+      if (mounted) FlushBar.show(context, e.toString(), isSuccess: false);
+    }
   }
 
   Widget _statusChip(DealStatusModel? status) {

@@ -1935,12 +1935,18 @@ class _LeadsViewState extends State<LeadsView> with TickerProviderStateMixin {
                           final value = controller.text.trim();
 
                           if (value.isNotEmpty) {
-                            await LeadService.editLeadComment(
+                            try {
+                              await LeadService.editLeadComment(
                               leadUid: _lead.uid ?? '',
                               commentUid: comment.uid ?? '',
                               commentText: value,
                             );
                             Navigator.pop(context);
+                            } catch (e) {
+                              Navigator.pop(context);
+                              if (!mounted) return;
+                              FlushBar.show(this.context, e.toString(), isSuccess: false);
+                            }
                           }
                         },
                         style: ElevatedButton.styleFrom(

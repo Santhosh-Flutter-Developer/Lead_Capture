@@ -212,7 +212,15 @@ class LeadService {
     required String commentUid,
     required String commentText,
   }) async {
-    throw 'Editing comments is not supported by the server yet.';
+    try {
+      (await LeadsApiService.call('edit_comment', {
+        'comment_uid': commentUid,
+        'comment': commentText,
+      })).ensureSuccess();
+      ApiLive.changed({'lead_$leadUid'});
+    } catch (e, st) {
+      _fail('Error editing comment', e, st);
+    }
   }
 
   static Future<List<Map<String, dynamic>>> getLeadComments({required String leadUid}) async {
@@ -269,11 +277,42 @@ class LeadService {
         'title': activity.title,
         'type': activity.type.name,
         'description': activity.description,
-        'scheduled_at': activity.scheduledAt.toIso8601String(),
+        'scheduled_at': activity.scheduledAt.millisecondsSinceEpoch,
       })).ensureSuccess();
       ApiLive.changed({'lead_$leadUid', 'calendar'});
     } catch (e, st) {
       _fail('Error adding activity', e, st);
+    }
+  }
+
+  static Future<void> editActivity({
+    required String leadUid,
+    required LeadActivityModel activity,
+  }) async {
+    try {
+      (await LeadsApiService.call('edit_activity', {
+        'activity_uid': activity.uid,
+        'title': activity.title,
+        'type': activity.type.name,
+        'description': activity.description,
+        'scheduled_at': activity.scheduledAt.millisecondsSinceEpoch,
+        'completed': activity.completed ? 1 : 0,
+      })).ensureSuccess();
+      ApiLive.changed({'lead_$leadUid', 'calendar'});
+    } catch (e, st) {
+      _fail('Error updating activity', e, st);
+    }
+  }
+
+  static Future<void> deleteActivity({
+    required String leadUid,
+    required String activityUid,
+  }) async {
+    try {
+      (await LeadsApiService.call('delete_activity', {'activity_uid': activityUid})).ensureSuccess();
+      ApiLive.changed({'lead_$leadUid', 'calendar'});
+    } catch (e, st) {
+      _fail('Error deleting activity', e, st);
     }
   }
 

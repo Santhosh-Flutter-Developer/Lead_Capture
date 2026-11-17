@@ -5,7 +5,6 @@ import 'package:local_notifier/local_notifier.dart';
 import 'package:window_manager/window_manager.dart';
 import '/services/services.dart';
 import '/app/app.dart';
-import '/constants/constants.dart';
 import '/views/views.dart';
 
 final AudioPlayer _player = AudioPlayer();
@@ -57,10 +56,14 @@ class FirestoreNotificationListener {
           notification.onClick = () async {
             await windowManager.focus();
             await windowManager.show();
-            if (n.payload['type'] == 'chat') {
-              NotificationService.instance.openFromPayload(
-                Map<String, dynamic>.from(n.payload),
-              );
+            // The PHP payload has no `type` key (it is a column of the
+            // notification), so take it from the model.
+            final t = n.type?.name ?? '';
+            if (t == 'chat' || t == 'task' || t == 'ticket') {
+              NotificationService.instance.openFromPayload({
+                ...n.payload,
+                'type': t,
+              });
               return;
             }
             final navigator = navigatorKey.currentState;

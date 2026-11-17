@@ -37,6 +37,13 @@ class ApiConfig {
   /// uploads are served from `<root>`.
   static String get siteRoot => baseUrl.replaceFirst(RegExp(r'/(api|admin)$'), '');
 
+  /// Server limit for every uploaded file (upload.php / chats.php): 30 MB.
+  static const int maxUploadBytes = 30 * 1024 * 1024;
+  static const String maxUploadLabel = '30 MB';
+  static bool exceedsUploadLimit(int bytes) => bytes > maxUploadBytes;
+  static String uploadTooLargeMessage(String fileName) =>
+      '"$fileName" is larger than $maxUploadLabel. Please choose a smaller file.';
+
   static const Duration connectTimeout = Duration(seconds: 20);
   static const Duration receiveTimeout = Duration(seconds: 45);
   static const Duration uploadTimeout = Duration(minutes: 3);

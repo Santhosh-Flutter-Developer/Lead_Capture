@@ -40,6 +40,9 @@ class StorageApiService {
     required String module,
     void Function(double)? onProgress,
   }) async {
+    if (ApiConfig.exceedsUploadLimit(bytes.length)) {
+      throw ApiException(ApiConfig.uploadTooLargeMessage(fileName), type: ApiErrorType.validation);
+    }
     final res = await ApiClient.instance.multipart(
       ApiEndpoints.upload,
       fields: {'module': module},

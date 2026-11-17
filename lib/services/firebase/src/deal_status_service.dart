@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '/utils/utils.dart';
 import '/models/models.dart';
 import '/services/services.dart';
 
@@ -7,10 +6,15 @@ import '/services/services.dart';
 class DealStatusService {
   static const String _type = MasterTypes.dealStatus;
 
-  static Future<List<Map<String, dynamic>>> _rows() async {
+  static Future<List<Map<String, dynamic>>> _fetchRows() async {
     final res = (await MastersApiService.list(_type)).ensureSuccess();
     return res.dataList.map(Js.m).toList();
   }
+
+  /// Read-only callers share one cached request per polling cycle; writes
+  /// call ApiLive.changed(_type) which drops the cache. [fresh] skips it.
+  static Future<List<Map<String, dynamic>>> _rows({bool fresh = false}) =>
+      fresh ? _fetchRows() : ApiLive.cached(_type, _fetchRows);
 
   static Never _fail(Object e, StackTrace st) {
     ErrorService.recordError(e, st);
@@ -23,7 +27,7 @@ class DealStatusService {
 
   static Future<int> _nextOrder() async {
     var max = 0;
-    for (final r in await _rows()) {
+    for (final r in await _rows(fresh: true)) {
       final o = Js.i(r['order_index']) ?? 0;
       if (o > max) max = o;
     }
@@ -50,7 +54,7 @@ class DealStatusService {
       final body = _body(dealStatus);
       if ((dealStatus.orderNumber) <= 0) {
         // Edit forms don't carry the order: keep the stored one.
-        for (final r in await _rows()) {
+        for (final r in await _rows(fresh: true)) {
           if (Js.s(r['uid']) == uid) {
             body['order_index'] = Js.i(r['order_index']) ?? 0;
             break;
@@ -103,7 +107,7 @@ class DealStatusService {
   static Future<DealStatusModel> getByNameOrCreate({required String name}) async {
     try {
       final n = name.trim().toLowerCase();
-      for (final r in await _rows()) {
+      for (final r in await _rows(fresh: true)) {
         if (Js.s(r['name']).trim().toLowerCase() == n) return ApiMappers.dealStatus(r);
       }
       final admin = await Spdb.getUser();
@@ -111,7 +115,7 @@ class DealStatusService {
         name: name, description: '', color: 0xFF2E5EAA, orderNumber: 0, createdBy: admin,
       )))).ensureSuccess();
       ApiLive.changed(_type);
-      for (final r in await _rows()) {
+      for (final r in await _rows(fresh: true)) {
         if (Js.s(r['name']).trim().toLowerCase() == n) return ApiMappers.dealStatus(r);
       }
       throw 'Could not create deal status';
@@ -125,7 +129,7 @@ class DealStatusService {
     String? excludeUid,
   }) async {
     try {
-      for (final r in await _rows()) {
+      for (final r in await _rows(fresh: true)) {
         if (excludeUid != null && Js.s(r['uid']) == excludeUid) continue;
         if (Js.s(r['name']).trim().toLowerCase() == name.trim().toLowerCase()) {
           return 'Deal status name already exists';

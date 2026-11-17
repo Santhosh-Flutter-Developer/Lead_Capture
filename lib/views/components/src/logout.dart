@@ -13,7 +13,14 @@ Future<void> _clearSession() async {
   await Spdb.clearDb();
 }
 
+bool _forcingLogout = false;
+
 Future<void> forceLogout() async {
+  // Late 401s from polling streams that are still alive after logout must not
+  // trigger another logout (it looped: logout API -> 401 -> logout ...).
+  if (_forcingLogout) return;
+  if (!await SessionManager.hasToken()) return;
+  _forcingLogout = true;
   try {
     await _clearSession();
     CacheService().clearAllBoxes();
@@ -27,6 +34,8 @@ Future<void> forceLogout() async {
     await ErrorService.recordError(e, st);
     debugPrint("${e.toString()}, ${st.toString()}");
     debugPrint('Logout failed: $e');
+  } finally {
+    _forcingLogout = false;
   }
 }
 

@@ -14,6 +14,7 @@
 //   Firebase Console → Project Settings → Cloud Messaging → Web Push certs
 //   → Generate Key Pair → copy the key string into kVapidKey below.
 // ─────────────────────────────────────────────────────────────────────────────
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
@@ -100,6 +101,49 @@ class NotificationService {
   final _localNotifications = FlutterLocalNotificationsPlugin();
   bool _isFlutterLocalNotificationsInitialized = false;
 
+  // ── Push token -> PHP API ─────────────────────────────────────────────────
+  StreamSubscription<String>? _tokenRefreshSub;
+
+  String get _deviceType {
+    if (kIsWeb) return 'web';
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return 'android';
+      case TargetPlatform.iOS:
+        return 'ios';
+      default:
+        return 'desktop';
+    }
+  }
+
+  /// Sends this device's FCM token to notifications.php (register_fcm_token)
+  /// so the server can push task / ticket / chat notifications to it. Safe to
+  /// call repeatedly (server upserts); does nothing when logged out or on
+  /// platforms without FCM. Never throws.
+  Future<void> syncTokenToServer() async {
+    try {
+      final supportsFcm = kIsWeb ||
+          defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS;
+      if (!supportsFcm) return;
+      if (!await SessionManager.hasToken()) return; // logged out
+      final token = await getToken();
+      if (token.isEmpty) return;
+      (await NotificationsApiService.registerFcmToken(
+        token: token,
+        deviceType: _deviceType,
+      )).ensureSuccess();
+      debugPrint('🔔 [NOTIF] FCM token registered with server ($_deviceType)');
+      // Keep the server copy fresh when FCM rotates the token.
+      _tokenRefreshSub ??= _messaging.onTokenRefresh.listen(
+        (_) => syncTokenToServer(),
+      );
+    } catch (e, st) {
+      debugPrint('❌ [NOTIF] token sync failed: $e');
+      await ErrorService.recordError(e, st);
+    }
+  }
+
   // ── Web initialisation ────────────────────────────────────────────────────
   /// Call this on web instead of initalize().
   /// Requests browser notification permission and sets up message handlers.
@@ -133,6 +177,7 @@ class NotificationService {
       // Get web push token (requires VAPID key)
       final token = await _messaging.getToken(vapidKey: kVapidKey);
       debugPrint('🌐 Web FCM token: $token');
+      syncTokenToServer(); // register with the PHP API (no-op if logged out)
 
       // Listen for foreground messages on web
       FirebaseMessaging.onMessage.listen(_handleWebForegroundMessage);
@@ -175,6 +220,8 @@ class NotificationService {
       'chat',
       'eventStarted',
       'eventReminder',
+      'task',
+      'ticket',
     ].contains(type);
 
     InAppToast.show(
@@ -186,7 +233,11 @@ class NotificationService {
           ? Iconsax.message
           : (type == 'eventStarted' || type == 'eventReminder')
               ? Iconsax.calendar_1
-              : Iconsax.notification_bing,
+              : type == 'task'
+                  ? Iconsax.task_square
+                  : type == 'ticket'
+                      ? Iconsax.ticket
+                      : Iconsax.notification_bing,
       // Tapping the toast goes to the exact chat / event.
       onTap: openable ? () => _handleBackgroundMessage(message.data) : null,
     );
@@ -202,6 +253,7 @@ class NotificationService {
       await setupFlutterNotifications();
       await _setupMessageHandlers();
       await _checkLaunchedFromNotification();
+      syncTokenToServer(); // register with the PHP API (no-op if logged out)
     } catch (e, st) {
       await ErrorService.recordError(e, st);
     }
@@ -310,7 +362,7 @@ class NotificationService {
 
     try {
       final notification = message.notification;
-      final data = message.data;
+      final data = _normalizePushData(message.data);
       debugPrint('🔔 [NOTIF] showNotification called, data=$data');
       final type = data['type'];
       final chatId = data['chatId'];
@@ -570,7 +622,8 @@ class NotificationService {
     _openFromPayload(payload);
   }
 
-  void _handleBackgroundMessage(Map<String, dynamic> message) {
+  void _handleBackgroundMessage(Map<String, dynamic> rawMessage) {
+    final message = _normalizePushData(rawMessage);
     debugPrint('🔔 [NOTIF] open requested: $message');
     // The app is already running for every runtime tap (banner "Open",
     // notification click, onMessageOpenedApp), so open straight away. Only
@@ -683,6 +736,28 @@ class NotificationService {
     Map<String, dynamic> message,
     NavigatorState navigator,
   ) async {
+    // Task push (create / update / status change): open that task.
+    if (message['type'] == 'task') {
+      final taskId = _payloadValue(message, 'taskId');
+      if (taskId.isNotEmpty) {
+        navigator.push(
+          CupertinoPageRoute(builder: (context) => TaskView(uid: taskId)),
+        );
+      }
+      return;
+    }
+
+    // Ticket push (create / update / status change): open that ticket.
+    if (message['type'] == 'ticket') {
+      final ticketId = _payloadValue(message, 'ticketId');
+      if (ticketId.isNotEmpty) {
+        navigator.push(
+          CupertinoPageRoute(builder: (context) => TicketView(uid: ticketId)),
+        );
+      }
+      return;
+    }
+
     if (message['type'] == 'eventStarted' ||
         message['type'] == 'eventReminder') {
       final eventId = message['eventId'];
@@ -706,6 +781,63 @@ class NotificationService {
       builder: (context) =>
           ConfirmDialog(content: message.toString(), title: "Notification"),
     );
+  }
+
+  /// The PHP server's push `data` differs a little from the old Cloud
+  /// Function payload (chat: `chat_uid` / `is_group` / `group_name` /
+  /// `sender_name`, and fields may sit inside a JSON `payload`). Flattens it
+  /// into the keys the handlers below expect (`chatId`, `isGroupChat`,
+  /// `chatTitle`, `senderName`).
+  Map<String, dynamic> _normalizePushData(Map<String, dynamic> raw) {
+    final out = Map<String, dynamic>.from(raw);
+    try {
+      var p = raw['payload'];
+      if (p is String && p.isNotEmpty) p = json.decode(p);
+      if (p is Map) {
+        p.forEach((k, v) => out.putIfAbsent(k.toString(), () => v));
+      }
+    } catch (_) {}
+    String pick(List<String> keys) {
+      for (final k in keys) {
+        final v = out[k];
+        if (v != null && v.toString().isNotEmpty && v.toString() != 'null') {
+          return v.toString();
+        }
+      }
+      return '';
+    }
+
+    if (pick(['chatId']).isEmpty) {
+      final c = pick(['chatUid', 'chat_uid']);
+      if (c.isNotEmpty) out['chatId'] = c;
+    }
+    if (out['isGroupChat'] == null) {
+      final g = out['is_group'];
+      out['isGroupChat'] =
+          (g == 1 || g == true || g == '1' || g == 'true') ? 'true' : 'false';
+    }
+    if (pick(['chatTitle']).isEmpty) {
+      final t = pick(['group_name']);
+      if (t.isNotEmpty) out['chatTitle'] = t;
+    }
+    if (pick(['senderName']).isEmpty) {
+      final n = pick(['sender_name']);
+      if (n.isNotEmpty) out['senderName'] = n;
+    }
+    return out;
+  }
+
+  /// Reads [key] from a push `data` map. The PHP server may send it flat
+  /// (`taskId`) or inside a JSON `payload` field, so both are checked.
+  String _payloadValue(Map<String, dynamic> data, String key) {
+    final direct = data[key];
+    if (direct != null && direct.toString().isNotEmpty) return direct.toString();
+    try {
+      var p = data['payload'];
+      if (p is String && p.isNotEmpty) p = json.decode(p);
+      if (p is Map && p[key] != null) return p[key].toString();
+    } catch (_) {}
+    return '';
   }
 
   Map<String, dynamic> convertPayload(String payload) {

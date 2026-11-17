@@ -3,9 +3,8 @@ import '/constants/constants.dart';
 import '/services/services.dart';
 import '/models/models.dart';
 
-/// Support tickets – backed by tickets.php (no Firestore). No history table
-/// or time-log endpoint exists on the server (history is empty, time logs
-/// are empty).
+/// Support tickets – backed by tickets.php (no Firestore). History and time
+/// logs come from the `get` response (activity_history, timelogs).
 class TicketService {
   static Never _fail(Object e, StackTrace st) {
     ErrorService.recordError(e, st);
@@ -115,16 +114,26 @@ class TicketService {
   static Future<Map<String, dynamic>> _detail(String id) async =>
       (await TicketsApiService.call('get', {'uid': id})).ensureSuccess().dataMap;
 
-  /// No time-log endpoint in tickets.php.
+  /// Work sessions = tickets.php `get` -> timelogs (opened when the status
+  /// becomes In Progress, closed on hold / pending customer / resolved / closed).
   static Stream<List<TaskTimeLogModel>> streamTimeLogs({
     required String cid,
     required String ticketId,
-  }) => ApiLive.value(<TaskTimeLogModel>[]);
+  }) => ApiLive.watch({'ticket_$ticketId'}, () async {
+    final l = Js.mapList((await _detail(ticketId))['timelogs']).map(CrmMappers.taskTimeLog).toList();
+    l.sort((a, b) => a.startTime.compareTo(b.startTime));
+    return l;
+  });
 
+  /// History = tickets.php `get` -> activity_history.
   static Stream<List<TicketHistoryModel>> streamTicketHistory({
     required String cid,
     required String ticketId,
-  }) => ApiLive.value(<TicketHistoryModel>[]);
+  }) => ApiLive.watch({'ticket_$ticketId'}, () async {
+    final l = Js.mapList((await _detail(ticketId))['activity_history']).map(CrmMappers.ticketHistory).toList();
+    l.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    return l;
+  });
 
   static Stream<List<TicketCommentModel>> streamComments({
     required String cid,
@@ -135,8 +144,13 @@ class TicketService {
     return l;
   });
 
-  static Future<List<TicketHistoryModel>> getTicketHistory({required String ticketId}) async =>
-      <TicketHistoryModel>[];
+  static Future<List<TicketHistoryModel>> getTicketHistory({required String ticketId}) async {
+    try {
+      return Js.mapList((await _detail(ticketId))['activity_history']).map(CrmMappers.ticketHistory).toList();
+    } catch (e, st) {
+      _fail(e, st);
+    }
+  }
 
   static Future<List<TicketCommentModel>> getComments({required String ticketId}) async {
     try {

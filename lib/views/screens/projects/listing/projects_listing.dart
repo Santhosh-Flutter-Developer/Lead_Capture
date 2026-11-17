@@ -133,6 +133,12 @@ class _ProjectsListingViewState extends State<ProjectsListingView> {
     return true;
   }
 
+  /// Project Lead name: local user cache first, else the name the server sent.
+  String _leadNameOf(ProjectModel p) {
+    final cached = CacheService.getUserByUid(p.projectOwner)?.name ?? '';
+    return cached.isNotEmpty ? cached : p.projectOwnerName;
+  }
+
   void _buildUserOptions(List<ProjectModel> projects) {
     if (identical(projects, _optionsSource)) return;
     _optionsSource = projects;
@@ -144,7 +150,7 @@ class _ProjectsListingViewState extends State<ProjectsListingView> {
       final mid = _masterClientUid(p);
       final mname = _masterNames[mid] ?? '';
       if (mid.isNotEmpty && mname.isNotEmpty) masters[mid] = mname;
-      final lead = CacheService.getUserByUid(p.projectOwner)?.name ?? '';
+      final lead = _leadNameOf(p);
       if (p.projectOwner.isNotEmpty && lead.isNotEmpty) {
         leads[p.projectOwner] = lead;
       }
@@ -818,7 +824,7 @@ class _ProjectsListingViewState extends State<ProjectsListingView> {
     int index,
   ) {
     final isSelected = controllerWatch.selectedIds.contains(project.uid);
-    final leadName = CacheService.getUserByUid(project.projectOwner)?.name ?? '';
+    final leadName = _leadNameOf(project);
 
     return DataRow(
       selected: isSelected,

@@ -182,6 +182,23 @@ class EmployeeService {
     }
   }
 
+  /// Every active login user (employees AND admins). Used where an admin can
+  /// also be picked (project lead / team lead / members), as the Employees
+  /// screen lists both.
+  static Future<List<EmployeeModel>> getAllActiveUsers() async {
+    try {
+      await ApiLookup.ensure();
+      final list = (await _userRows())
+          .where((r) => Js.b(r['is_active'], true))
+          .map(ApiMappers.employee)
+          .toList();
+      list.sort((a, b) => a.name.compareTo(b.name));
+      return list;
+    } catch (e, st) {
+      _fail('Error fetching users', e, st);
+    }
+  }
+
   /// The API can only replace a photo with another path; "removing" sets the
   /// default avatar. The old file stays on the server (upload.php has no
   /// delete endpoint).

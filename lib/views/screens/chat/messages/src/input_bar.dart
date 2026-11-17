@@ -75,9 +75,12 @@ class _ChatInputBarState extends State<ChatInputBar> {
     );
 
     if (files != null && files.files.isNotEmpty) {
-      setState(() {
-        _pickedFiles.addAll(files.files);
-      });
+      final allowed = limitUploadSize(context, files.files);
+      if (allowed.isNotEmpty) {
+        setState(() {
+          _pickedFiles.addAll(allowed);
+        });
+      }
     }
   }
 
@@ -113,8 +116,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
       FlushBar.show(
         context,
         result.tooLarge == 1
-            ? 'That file is too large to attach here (max 100 MB).'
-            : '${result.tooLarge} files are too large to attach here (max 100 MB).',
+            ? 'That file is too large to attach (max ${ApiConfig.maxUploadLabel}).'
+            : '${result.tooLarge} files are too large to attach (max ${ApiConfig.maxUploadLabel}).',
         isSuccess: false,
       );
     }

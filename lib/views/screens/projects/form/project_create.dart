@@ -65,7 +65,7 @@ class _ProjectCreateState extends State<ProjectCreate> {
       _masterClients.clear();
       _employeesList.clear();
       _dealList.clear();
-      _employeesList = await EmployeeService.getAllEmployees();
+      _employeesList = await EmployeeService.getAllActiveUsers();
       _masterClients = await ClientService.getMasterClients();
       _dealList = await DealService.getAllDeals();
       _existingProjects = await ProjectService.getAllProjects();

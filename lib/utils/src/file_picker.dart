@@ -1,10 +1,38 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show BuildContext;
+
+import '/services/services.dart' show ApiConfig;
+import '/views/views.dart' show FlushBar;
 
 import 'file_picker_io.dart'
     if (dart.library.html) 'file_picker_web.dart' show readBytesFromPath;
 
 export 'package:file_picker/file_picker.dart' show PlatformFile, FileType;
+
+/// Drops files above the 30 MB server upload limit and tells the user, so a
+/// too-large file is never added to a form / upload list.
+List<PlatformFile> limitUploadSize(dynamic context, List<PlatformFile> files) {
+  final ok = <PlatformFile>[];
+  final rejected = <String>[];
+  for (final f in files) {
+    if (ApiConfig.exceedsUploadLimit(f.size)) {
+      rejected.add(f.name);
+    } else {
+      ok.add(f);
+    }
+  }
+  if (rejected.isNotEmpty && context is BuildContext && context.mounted) {
+    FlushBar.show(
+      context,
+      rejected.length == 1
+          ? ApiConfig.uploadTooLargeMessage(rejected.first)
+          : '${rejected.length} files are larger than ${ApiConfig.maxUploadLabel} and were not added.',
+      isSuccess: false,
+    );
+  }
+  return ok;
+}
 
 class FilePick {
   /// Picks multiple files. Returns a list of [PlatformFile].
@@ -15,7 +43,7 @@ class FilePick {
       allowMultiple: true,
       withData: true,
     );
-    return result?.files;
+    return result == null ? null : limitUploadSize(context, result.files);
   }
 
   /// Picks a single file.
@@ -28,7 +56,9 @@ class FilePick {
       type: allowedExtensions != null ? FileType.custom : FileType.any,
       withData: true,
     );
-    return result?.files.firstOrNull;
+    final f = result?.files.firstOrNull;
+    if (f == null) return null;
+    return limitUploadSize(context, [f]).firstOrNull;
   }
 
   /// Picks multiple files with extension filter.
@@ -42,7 +72,7 @@ class FilePick {
       allowMultiple: true,
       withData: true,
     );
-    return result?.files;
+    return result == null ? null : limitUploadSize(context, result.files);
   }
 }
 

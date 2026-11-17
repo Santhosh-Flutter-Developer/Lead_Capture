@@ -123,12 +123,19 @@ class DealBloc extends Bloc<DealEvent, DealState> {
     }
   }
 
-  /// deals.php has no edit/delete activity action.
   Future<void> _editDealActivity(EditDealActivity event, Emitter<DealState> emit) async {
-    emit(DealError('Editing activities is not supported by the server yet.'));
+    try {
+      await DealService.editActivity(dealUid: event.dealUid, activity: event.activity);
+    } catch (e) {
+      emit(DealError(e.toString()));
+    }
   }
 
   Future<void> _deleteDealActivity(DeleteDealActivity event, Emitter<DealState> emit) async {
-    emit(DealError('Deleting activities is not supported by the server yet.'));
+    try {
+      await DealService.deleteActivity(dealUid: event.dealUid, activityUid: event.activityUid);
+    } catch (e) {
+      emit(DealError(e.toString()));
+    }
   }
 }

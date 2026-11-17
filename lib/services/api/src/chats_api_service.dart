@@ -1,4 +1,6 @@
 import 'api_client.dart';
+import 'api_config.dart';
+import 'api_exception.dart';
 import 'api_constants.dart';
 import 'api_response.dart';
 
@@ -35,6 +37,11 @@ class ChatsApiService {
       if (replyToId != null) 'reply_to_id': replyToId,
       if (replyToSnippet != null) 'reply_to_snippet': replyToSnippet,
     };
+    for (final f in files) {
+      if (ApiConfig.exceedsUploadLimit(f.bytes.length)) {
+        throw ApiException(ApiConfig.uploadTooLargeMessage(f.fileName), type: ApiErrorType.validation);
+      }
+    }
     if (files.isEmpty) return _c.post(ApiEndpoints.chats, action: 'send_message', body: fields);
     return _c.multipart(
       ApiEndpoints.chats,

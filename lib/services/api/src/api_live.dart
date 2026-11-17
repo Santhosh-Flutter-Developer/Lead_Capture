@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'session_manager.dart';
+
 /// The old app relied on Firestore `.snapshots()` so lists refreshed by
 /// themselves after any write. The PHP API is request/response only, so:
 ///  * every successful write calls [ApiLive.changed] with the data keys it
@@ -10,10 +12,41 @@ class ApiLive {
   ApiLive._();
   static final StreamController<String> _bus = StreamController<String>.broadcast();
 
+  static final Map<String, int> _stamps = {};
+  static final Map<String, _CacheEntry> _cache = {};
+
+  /// Short-lived cache for rarely-changing lookups (lead / deal status ...)
+  /// that several watchers read in the same polling cycle. Concurrent calls
+  /// share one request (the Future itself is cached), and any
+  /// [changed] of [key] (a write) drops it. Keyed per session token so a
+  /// different login never sees another user's data.
+  static Future<T> cached<T>(
+    String key,
+    Future<T> Function() fetch, {
+    Duration ttl = const Duration(minutes: 2),
+  }) async {
+    final ck = '$key|${await SessionManager.getToken() ?? ''}';
+    final stamp = _stamps[key] ?? 0;
+    final e = _cache[ck];
+    if (e != null &&
+        e.stamp == stamp &&
+        DateTime.now().difference(e.at) < ttl) {
+      return e.future as Future<T>;
+    }
+    final f = fetch();
+    _cache[ck] = _CacheEntry(f, DateTime.now(), stamp);
+    f.catchError((_) {
+      if (identical(_cache[ck]?.future, f)) _cache.remove(ck);
+      return f;
+    });
+    return f;
+  }
+
   /// Notify watchers that data under [keys] changed (e.g. 'designation').
   static void changed(Object keys) {
     final list = keys is Iterable ? keys.map((e) => e.toString()) : [keys.toString()];
     for (final k in list) {
+      _stamps[k] = (_stamps[k] ?? 0) + 1;
       _bus.add(k);
     }
   }
@@ -48,10 +81,13 @@ class ApiLive {
         again = true;
         return;
       }
+      // Logged out (token cleared): stop polling instead of hammering the API
+      // with 401s.
       running = true;
       try {
         do {
           again = false;
+          if (!await SessionManager.hasToken()) break;
           try {
             final v = await fetch();
             if (!ctrl.isClosed) {
@@ -88,4 +124,11 @@ class ApiLive {
       c.onCancel = s.cancel;
     }, isBroadcast: true);
   }
+}
+
+class _CacheEntry {
+  _CacheEntry(this.future, this.at, this.stamp);
+  final Future<dynamic> future;
+  final DateTime at;
+  final int stamp;
 }

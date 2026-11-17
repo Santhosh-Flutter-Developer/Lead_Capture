@@ -128,19 +128,26 @@ class LeadBloc extends Bloc<LeadEvent, LeadState> {
     }
   }
 
-  /// leads.php has no edit/delete activity action (MISSING_API_REQUIREMENTS.md).
   Future<void> _editLeadActivity(
     EditLeadActivity event,
     Emitter<LeadState> emit,
   ) async {
-    emit(LeadError('Editing activities is not supported by the server yet.'));
+    try {
+      await LeadService.editActivity(leadUid: event.leadUid, activity: event.activity);
+    } catch (e) {
+      emit(LeadError(e.toString()));
+    }
   }
 
   Future<void> _deleteLeadActivity(
     DeleteLeadActivity event,
     Emitter<LeadState> emit,
   ) async {
-    emit(LeadError('Deleting activities is not supported by the server yet.'));
+    try {
+      await LeadService.deleteActivity(leadUid: event.leadUid, activityUid: event.activityUid);
+    } catch (e) {
+      emit(LeadError(e.toString()));
+    }
   }
 
   Future<void> _streamLeadHistory(

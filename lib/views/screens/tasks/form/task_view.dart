@@ -164,9 +164,7 @@ class _TaskViewState extends State<TaskView> with TickerProviderStateMixin {
             break;
           case TaskStatus.started:
           case TaskStatus.inProgress:
-            if (!_taskModel.hasStarted && _taskModel.startedTime == null) {
-              _taskModel.startedTime = now;
-            }
+            _taskModel.startedTime ??= now;
             _taskModel.hasStarted = true;
             _taskModel.completed = false;
             break;
@@ -284,6 +282,7 @@ class _TaskViewState extends State<TaskView> with TickerProviderStateMixin {
         isParticipant =
             currentUid != null &&
             (_taskModel.assignees.contains(currentUid!) ||
+                _taskModel.participants.contains(currentUid!) ||
                 _taskModel.createdBy.contains(currentUid!));
 
         return Scaffold(

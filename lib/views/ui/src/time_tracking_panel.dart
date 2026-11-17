@@ -88,7 +88,12 @@ class _TimeTrackingPanelState extends State<TimeTrackingPanel> {
     super.didUpdateWidget(old);
     final wasRunning = old.state == TimeTrackingState.running;
     if (wasRunning && !_running) _pausedAt = DateTime.now();
-    if (_running) _pausedAt = null;
+    if (_running) {
+      _pausedAt = null;
+      // Don't start from a stale clock: otherwise the new session looks empty
+      // until the first tick.
+      if (!wasRunning) _now = DateTime.now();
+    }
     _syncTicker();
   }
 

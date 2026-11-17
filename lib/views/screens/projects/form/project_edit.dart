@@ -68,7 +68,7 @@ class _ProjectEditState extends State<ProjectEdit> {
     try {
       _masterClients.clear();
       _employeesList.clear();
-      _employeesList = await EmployeeService.getAllEmployees();
+      _employeesList = await EmployeeService.getAllActiveUsers();
       _masterClients = await ClientService.getMasterClients();
       _dealList = await DealService.getAllDeals();
       _existingProjects = await ProjectService.getAllProjects();

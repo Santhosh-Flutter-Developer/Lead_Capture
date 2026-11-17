@@ -51,6 +51,9 @@ class AuthService {
       final isAdmin = ApiMappers.isAdminRow(row);
       _pendingPassword = password;
 
+      // Register this device for push (task / ticket / chat notifications).
+      NotificationService.instance.syncTokenToServer();
+
       final out = <String, dynamic>{
         'status': true,
         'collectionId': Js.s(session['company_id'] ?? row['company_id']),
