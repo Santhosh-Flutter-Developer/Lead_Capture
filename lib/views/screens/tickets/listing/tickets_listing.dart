@@ -95,7 +95,7 @@ class _TicketListingViewState extends State<TicketListingView> {
   // ---------------------------------------------------------------------
   // Filters: Status, Priority, Assigned To, Created By, Master Client, Project, Date range
   // ---------------------------------------------------------------------
-  TicketStatus? _fStatus;
+  String? _fStatus; // status label (master name or Cancelled)
   TicketPriority? _fPriority;
   String? _fAssigneeUid;
   String? _fAssigneeName;
@@ -164,10 +164,19 @@ class _TicketListingViewState extends State<TicketListingView> {
   List<String> _masterClientItems = const [];
   List<String> _projectItems = const [];
 
-  static final Map<String, TicketStatus> _statusOpts = {
-    for (final s in TicketStatus.values) s.label: s,
-  };
-  static final List<String> _statusItems = _statusOpts.keys.toList();
+  // Status filter options come from the Ticket Status master (+ Cancelled).
+  List<String> _statusItems = [
+    for (final s in TicketStatus.values) s.label,
+    'Cancelled',
+  ];
+
+  Future<void> _loadStatusOptions() async {
+    try {
+      final l = await TicketService.getStatuses();
+      if (!mounted || l.isEmpty) return;
+      setState(() => _statusItems = [...l.map((e) => e.name), 'Cancelled']);
+    } catch (_) {}
+  }
   static final Map<String, TicketPriority> _priorityOpts = {
     for (final p in TicketPriority.values) p.label: p,
   };
@@ -189,7 +198,10 @@ class _TicketListingViewState extends State<TicketListingView> {
       t.ticketCreatedBy.uid.isNotEmpty ? [t.ticketCreatedBy.uid] : t.createdBy;
 
   bool _matchesFilters(CustomerTicketModel t) {
-    if (_fStatus != null && t.status != _fStatus) return false;
+    if (_fStatus != null &&
+        t.statusText.toLowerCase() != _fStatus!.toLowerCase()) {
+      return false;
+    }
     if (_fPriority != null && t.priorityLevel != _fPriority) return false;
     if (_fAssigneeUid != null && !t.assignTo.contains(_fAssigneeUid)) {
       return false;
@@ -314,11 +326,11 @@ class _TicketListingViewState extends State<TicketListingView> {
         FormDropdownSearch(
           key: ValueKey('f_status_$_filterEpoch'),
           label: 'Status',
-          initialItem: _fStatus?.label,
+          initialItem: _fStatus,
           items: _statusItems,
           onChanged: (v) {
             setState(
-              () => _fStatus = v == null ? null : _statusOpts[v as String],
+              () => _fStatus = v as String?,
             );
             _applyFilters(controllerRead);
           },
@@ -443,6 +455,7 @@ class _TicketListingViewState extends State<TicketListingView> {
   void initState() {
     super.initState();
     _loadPermissions();
+    _loadStatusOptions();
   }
 
   @override
@@ -675,7 +688,7 @@ class _TicketListingViewState extends State<TicketListingView> {
         _gradientButton(
           context: context,
           icon: Iconsax.trash,
-          label: "Delete (${_selectedTickets.length})",
+          label: "Cancel (${_selectedTickets.length})",
           colors: const [Color(0xFFDC3545), Color(0xFFFF6B6B)],
           onPressed: _bulkDelete,
         ),
@@ -907,8 +920,12 @@ class _TicketListingViewState extends State<TicketListingView> {
     );
   }
 
-  Widget _statusPill(BuildContext context, TicketStatus status) {
-    final color = _getStatusColor(status);
+  Widget _statusPill(BuildContext context, CustomerTicketModel ticket) {
+    final color = ticket.isCancelled
+        ? AppColors.danger
+        : ticket.statusColor != null
+        ? Color(ticket.statusColor!)
+        : _getStatusColor(ticket.status);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
@@ -925,7 +942,7 @@ class _TicketListingViewState extends State<TicketListingView> {
           ),
           const SizedBox(width: 6),
           Text(
-            status.label,
+            ticket.statusText,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: color,
               fontWeight: FontWeight.w700,
@@ -1007,11 +1024,38 @@ class _TicketListingViewState extends State<TicketListingView> {
       },
       cells: [
         dataCell(
-          Text(
-            ticket.ticketNumber?.toString() ?? '-',
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                ticket.ticketNumber?.toString() ?? '-',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              // Cancelled tickets stay in the list, flagged under the number.
+              if (ticket.isCancelled)
+                Container(
+                  margin: const EdgeInsets.only(top: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.danger.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Text(
+                    'CANCEL',
+                    style: TextStyle(
+                      color: AppColors.danger,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+            ],
           ),
           ticket.uid ?? '',
         ),
@@ -1024,7 +1068,7 @@ class _TicketListingViewState extends State<TicketListingView> {
           ),
           ticket.uid ?? '',
         ),
-        dataCell(_statusPill(context, ticket.status), ticket.uid ?? ''),
+        dataCell(_statusPill(context, ticket), ticket.uid ?? ''),
         dataCell(
           Text(ticket.clientName, style: Theme.of(context).textTheme.bodySmall),
           ticket.uid ?? '',
@@ -1074,7 +1118,7 @@ class _TicketListingViewState extends State<TicketListingView> {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (permissions?.canEdit ?? false)
+              if ((permissions?.canEdit ?? false) && !ticket.isCancelled)
                 _iconCircleButton(
                   context,
                   icon: Iconsax.edit,
@@ -1095,9 +1139,17 @@ class _TicketListingViewState extends State<TicketListingView> {
                 _iconCircleButton(
                   context,
                   icon: Iconsax.trash,
-                  tooltip: "Delete $_pageTitle",
-                  background: AppColors.danger.withValues(alpha: 0.12),
-                  iconColor: AppColors.danger,
+                  tooltip: ticket.isCancelled
+                      ? "Already cancelled"
+                      : ticket.canCancel
+                      ? "Cancel $_pageTitle"
+                      : "Status already changed – can't be cancelled",
+                  background: AppColors.danger.withValues(
+                    alpha: ticket.canCancel ? 0.12 : 0.05,
+                  ),
+                  iconColor: ticket.canCancel
+                      ? AppColors.danger
+                      : AppColors.danger.withValues(alpha: 0.35),
                   onPressed: () => _onDeleteTap(ticket),
                 ),
               ],
@@ -1108,35 +1160,27 @@ class _TicketListingViewState extends State<TicketListingView> {
     );
   }
 
+  /// "Delete" = Cancel with remarks. Not possible once the status changed.
   Future<void> _onDeleteTap(CustomerTicketModel ticket) async {
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => ConfirmDialog(
-        title: 'Delete $_pageTitle',
-        content: 'Are you sure you want to delete this ticket?',
-      ),
-    );
-
-    if (result != true) return;
-    if (!mounted) return;
-
-    try {
-      final deletedTicket = ticket;
-
-      await TicketService.deleteTicket(uid: ticket.uid ?? '');
-
-      if (!mounted) return;
-
+    if (ticket.isCancelled) {
+      FlushBar.show(context, 'This ticket is already cancelled.', isSuccess: false);
+      return;
+    }
+    if (!ticket.canCancel) {
       FlushBar.show(
         context,
-        '$_pageTitle deleted successfully',
-        actionLabel: 'UNDO',
-        onActionPressed: () async {
-          await TicketService.restoreTicket(deletedTicket);
-          if (!mounted) return;
-          context.read<TicketBloc>().add(StreamTickets());
-        },
+        "Status has already been changed – this ticket can't be cancelled.",
+        isSuccess: false,
       );
+      return;
+    }
+    final remarks = await showCancelRemarksDialog(context, entity: 'ticket');
+    if (remarks == null || !mounted) return;
+
+    try {
+      await TicketService.cancelTicket(uid: ticket.uid ?? '', remarks: remarks);
+      if (!mounted) return;
+      FlushBar.show(context, '$_pageTitle cancelled successfully');
     } catch (e, st) {
       await ErrorService.recordError(e, st);
       if (!mounted) return;
@@ -1146,53 +1190,45 @@ class _TicketListingViewState extends State<TicketListingView> {
 
   Future<void> _bulkDelete() async {
     if (_selectedTickets.isEmpty) return;
+    final eligible = _selectedTickets.where((t) => t.canCancel).toList();
+    final skipped = _selectedTickets.length - eligible.length;
+    if (eligible.isEmpty) {
+      FlushBar.show(
+        context,
+        "Selected tickets are already cancelled or their status has changed – they can't be cancelled.",
+        isSuccess: false,
+      );
+      return;
+    }
 
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => ConfirmDialog(
-        title: 'Delete',
-        content: 'Are you sure want to delete this $_pageTitle?',
-      ),
-      barrierDismissible: false,
+    final remarks = await showCancelRemarksDialog(
+      context,
+      entity: 'ticket',
+      count: eligible.length,
     );
-
-    if (result != true) return;
-    if (!mounted) return;
+    if (remarks == null || !mounted) return;
 
     try {
-      final deletedTickets = List<CustomerTicketModel>.from(_selectedTickets);
-
       futureLoading(context);
-
-      for (var ticket in deletedTickets) {
-        await TicketService.deleteTicket(uid: ticket.uid ?? '');
-      }
-
-      if (Navigator.canPop(context)) {
-        Navigator.pop(context);
-      }
+      final msg = await TicketService.cancelTickets(
+        uids: eligible.map((t) => t.uid ?? '').toList(),
+        remarks: remarks,
+      );
+      if (Navigator.canPop(context)) Navigator.pop(context);
 
       _selectedTickets.clear();
+      context
+          .read<PaginatedDataController<CustomerTicketModel>>()
+          .clearSelection();
       setState(() {});
 
       if (!mounted) return;
-
       FlushBar.show(
         context,
-        '$_pageTitle deleted successfully',
-        actionLabel: 'UNDO',
-        onActionPressed: () async {
-          for (var ticket in deletedTickets) {
-            await TicketService.restoreTicket(ticket);
-          }
-          if (!mounted) return;
-          context.read<TicketBloc>().add(StreamTickets());
-        },
+        skipped > 0 ? '$msg ($skipped skipped – status already changed)' : msg,
       );
     } catch (e) {
-      if (Navigator.canPop(context)) {
-        Navigator.pop(context);
-      }
+      if (Navigator.canPop(context)) Navigator.pop(context);
       if (!mounted) return;
       FlushBar.show(context, e.toString(), isSuccess: false);
     }

@@ -2,6 +2,7 @@ enum ApiErrorType {
   network,
   timeout,
   unauthorized,
+  forbidden,
   server,
   invalidResponse,
   validation,

@@ -75,6 +75,37 @@ class NotificationsListing extends StatefulWidget {
 }
 
 class _NotificationsListingState extends State<NotificationsListing> {
+  Future<void> _runPushDiagnostics() async {
+    final ctx = context;
+    showDialog(
+      context: ctx,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+    String result;
+    try {
+      result = await NotificationService.instance.pushDiagnostics();
+    } catch (e) {
+      result = 'Diagnostics failed: $e';
+    }
+    debugPrint('[PUSH CHECK]\n$result');
+    if (!mounted) return;
+    Navigator.of(ctx, rootNavigator: true).pop(); // loader
+    showDialog(
+      context: ctx,
+      builder: (_) => AlertDialog(
+        title: const Text('Push notification check'),
+        content: SingleChildScrollView(child: SelectableText(result)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx, rootNavigator: true).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   final TextEditingController _searchController = TextEditingController();
   String _search = '';
   // Grouped by display label (not raw enum) so types that share one label/
@@ -727,7 +758,8 @@ class _NotificationsListingState extends State<NotificationsListing> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
+          Row(children: [
+          Expanded(child: Container(
             decoration: BoxDecoration(
               color: Theme.of(context).scaffoldBackgroundColor,
               borderRadius: BorderRadius.circular(12),
@@ -763,7 +795,14 @@ class _NotificationsListingState extends State<NotificationsListing> {
                 contentPadding: const EdgeInsets.symmetric(vertical: 14),
               ),
             ),
+          )),
+          const SizedBox(width: 8),
+          IconButton(
+            tooltip: 'Test push notification',
+            icon: const Icon(Iconsax.notification),
+            onPressed: _runPushDiagnostics,
           ),
+          ]),
           if (presentLabels.isNotEmpty) ...[
             const SizedBox(height: 12),
             SizedBox(

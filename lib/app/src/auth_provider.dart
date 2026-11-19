@@ -26,7 +26,8 @@ class AuthProvider with ChangeNotifier {
         }
       }
 
-      // Any 401/403 from the PHP API forces the user back to Login.
+      // A 401 (invalid/expired token) forces the user back to Login. A 403 is
+      // only "permission denied" for one action and keeps the session.
       SessionManager.onUnauthorized = () {
         // ignore: discarded_futures
         forceLogout();
@@ -69,6 +70,10 @@ class AuthProvider with ChangeNotifier {
               .catchError((e, st) {
                 debugPrint("AuthProvider: startup cache sync FAILED: $e");
               });
+          // Reconnect the WebSocket for the restored session.
+          RealtimeService.start();
+          // Restored session: make sure this device's FCM token is on the server.
+          NotificationService.instance.syncTokenToServer();
           // Initialize static lead statuses
           // Web gets the same sidebar (desktop) layout as native desktop
           if (kIsDesktop || kIsWeb) {

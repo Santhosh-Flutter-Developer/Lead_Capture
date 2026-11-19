@@ -231,7 +231,18 @@ class ApiClient {
       if (decoded is Map) json = Map<String, dynamic>.from(decoded);
     } catch (_) {}
 
-    if (code == 401 || code == 403) {
+    // 403 = "Permission denied." for ONE action (hasPermission() in PHP). The
+    // session is still valid, so it must NOT log the user out - only show the
+    // message. A 403 whose text says the token/session is bad still logs out.
+    if (code == 403) {
+      final msg = (json?['message'] ?? 'Permission denied.').toString();
+      if (_looksLikeAuthFailure(msg)) {
+        SessionManager.onUnauthorized?.call();
+        throw ApiException(msg, type: ApiErrorType.unauthorized, statusCode: code);
+      }
+      throw ApiException(msg, type: ApiErrorType.forbidden, statusCode: code);
+    }
+    if (code == 401) {
       // forceLogout ignores this when there is no session token any more.
       SessionManager.onUnauthorized?.call();
       throw ApiException(

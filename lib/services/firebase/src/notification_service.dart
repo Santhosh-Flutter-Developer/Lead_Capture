@@ -72,6 +72,16 @@ Future<bool> _isForCurrentUser(Map<String, dynamic> data) async {
   }
 }
 
+/// One notification can reach the app three ways: FCM, WebSocket and the
+/// fallback poll. All share FirestoreNotificationListener.claim(uid), so it is
+/// shown once. Messages built by showFromApi carry `lc_local` (already claimed).
+bool _alreadyShown(Map<String, dynamic> data) {
+  if ((data['lc_local'] ?? '').toString() == '1') return false;
+  final id = (data['notification_uid'] ?? data['uid'] ?? '').toString();
+  if (id.isEmpty) return false;
+  return !FirestoreNotificationListener.claim(id);
+}
+
 /// Returns the FCM token for the current device/browser.
 Future<String> getToken() async {
   try {
@@ -104,6 +114,11 @@ class NotificationService {
   // ── Push token -> PHP API ─────────────────────────────────────────────────
   StreamSubscription<String>? _tokenRefreshSub;
 
+  /// Token last registered on the server. Logout removes THIS one (FCM may
+  /// hand out a different token later, which would leave the registered row
+  /// behind and keep pushing to a logged-out device).
+  final Set<String> registeredTokens = {};
+
   String get _deviceType {
     if (kIsWeb) return 'web';
     switch (defaultTargetPlatform) {
@@ -133,6 +148,7 @@ class NotificationService {
         token: token,
         deviceType: _deviceType,
       )).ensureSuccess();
+      registeredTokens.add(token);
       debugPrint('🔔 [NOTIF] FCM token registered with server ($_deviceType)');
       // Keep the server copy fresh when FCM rotates the token.
       _tokenRefreshSub ??= _messaging.onTokenRefresh.listen(
@@ -142,6 +158,73 @@ class NotificationService {
       debugPrint('❌ [NOTIF] token sync failed: $e');
       await ErrorService.recordError(e, st);
     }
+  }
+
+  /// Step-by-step push check (shown from the Notifications page). Tells which
+  /// link is broken: permission -> FCM token -> registered on server ->
+  /// server FCM config -> FCM send (test_push).
+  Future<String> pushDiagnostics() async {
+    final out = StringBuffer();
+    final supports = kIsWeb ||
+        defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS;
+    out.writeln('Platform: $_deviceType');
+    if (!supports) {
+      out.writeln('This platform has no FCM push (uses WebSocket / local '
+          'notifications only).');
+      return out.toString();
+    }
+    try {
+      final s = await _messaging.getNotificationSettings();
+      out.writeln('1. Permission: ${s.authorizationStatus.name}');
+    } catch (e) {
+      out.writeln('1. Permission: error $e');
+    }
+    String token = '';
+    try {
+      token = await getToken();
+    } catch (_) {}
+    out.writeln(token.isEmpty
+        ? '2. FCM token: NONE (browser/app could not get a token - check '
+            'permission, VAPID key, service worker)'
+        : '2. FCM token: OK (${token.substring(0, 12)}...)');
+    if (token.isEmpty) return out.toString();
+    try {
+      final r = await NotificationsApiService.registerFcmToken(
+          token: token, deviceType: _deviceType);
+      out.writeln('3. Register on server: ${r.status ? 'OK' : 'FAILED - ${r.message}'}');
+    } catch (e) {
+      out.writeln('3. Register on server: ERROR $e');
+    }
+    try {
+      final r = await NotificationsApiService.call('config');
+      final d = r.dataMap;
+      out.writeln('4. Server config: fcm_enabled=${d['fcm_enabled']}, '
+          'service_account=${d['fcm_service_account']}, '
+          'project=${d['fcm_project_id']}');
+    } catch (e) {
+      out.writeln('4. Server config: ERROR $e');
+    }
+    try {
+      final r = await NotificationsApiService.call('test_push');
+      final d = r.dataMap;
+      out.writeln('5. test_push: sent=${d['sent']}, failed=${d['failed']}, '
+          'tokens_found=${d['tokens_found']}, error=${d['error'] ?? d['skipped'] ?? '-'}');
+      if ((Js.i(d['sent']) ?? 0) > 0) {
+        out.writeln('=> Server sent it. Switch to another tab/app now: the '
+            'system notification should appear. If it does not, the problem is '
+            'the browser/OS (site notification permission, Focus Assist, '
+            'service worker).');
+      } else if ((Js.i(d['tokens_found']) ?? 1) == 0) {
+        out.writeln('=> Server has NO token for you (register failed).');
+      } else {
+        out.writeln('=> FCM rejected it. API team: check PHP error_log for '
+            '"[FCM REJECTED]" / "[FCM WARNING]".');
+      }
+    } catch (e) {
+      out.writeln('5. test_push: ERROR $e');
+    }
+    return out.toString();
   }
 
   // ── Web initialisation ────────────────────────────────────────────────────
@@ -201,6 +284,7 @@ class NotificationService {
   Future<void> _handleWebForegroundMessage(RemoteMessage message) async {
     // Not for the user logged in here -> ignore.
     if (!await _isForCurrentUser(message.data)) return;
+    if (_alreadyShown(message.data)) return; // WebSocket / poll showed it
 
     // On web, flutter_local_notifications is not available.
     // Show an in-app snackbar/dialog instead.
@@ -348,6 +432,31 @@ class NotificationService {
 
   final Map<String, List<Message>> _messageHistory = {};
 
+  /// Shows a notification that came from the PHP API (WebSocket event or the
+  /// notifications.php poll) with the SAME display path the FCM push used:
+  /// web -> in-app toast, Android / iOS -> local notification.
+  /// Desktop is handled by FirestoreNotificationListener.
+  Future<void> showFromApi(NotificationModel n) async {
+    final data = <String, dynamic>{
+      for (final e in n.payload.entries) e.key: '${e.value}',
+      'type': n.type?.name ?? 'info',
+      'title': n.title,
+      'body': n.body,
+      'notification_uid': n.uid ?? '',
+      'lc_local': '1', // already claimed by RealtimeService
+    };
+    final message = RemoteMessage(
+      messageId: n.uid,
+      data: data,
+      notification: RemoteNotification(title: n.title, body: n.body),
+    );
+    if (kIsWeb) {
+      await _handleWebForegroundMessage(message);
+    } else {
+      await showNotification(message);
+    }
+  }
+
   Future<void> showNotification(RemoteMessage message) async {
     // On web, showNotification is handled by the service worker (SW).
     // Foreground messages are handled by _handleWebForegroundMessage().
@@ -359,6 +468,7 @@ class NotificationService {
       debugPrint('🔕 [NOTIF] dropped: not for the logged-in user');
       return;
     }
+    if (_alreadyShown(message.data)) return; // WebSocket / poll showed it
 
     try {
       final notification = message.notification;

@@ -162,6 +162,10 @@ class _DesktopMainScreenState extends State<DesktopMainScreen> {
         return const PaymentModeListing();
       case 'Lead Priority':
         return const LeadPriorityListing();
+      case 'Task Status':
+        return const TaskStatusListing();
+      case 'Ticket Status':
+        return const TicketStatusListing();
       case 'Deal Status':
         return const DealStatusListing();
       case 'Leads':

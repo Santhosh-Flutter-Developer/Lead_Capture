@@ -33,6 +33,19 @@ class TaskModel {
   String? status;
   bool completed;
   DateTime? completedTime;
+
+  /// Master status (Creation -> Task Status) shown for this task. null for
+  /// older payloads; then the built-in labels are used.
+  String? statusLabel;
+  int? statusColor;
+
+  /// Deleting a task cancels it (with remarks). Cancelled tasks stay in the
+  /// list but are read-only.
+  bool isCancelled;
+  String? cancelRemarks;
+
+  /// true once the status was moved off the initial one (no cancel after that).
+  bool statusHasChanged;
   final List<FileModel> attachments;
   final List<TaskCommentModel> comments;
   final List<TaskHistoryModel> history;
@@ -63,6 +76,11 @@ class TaskModel {
     this.status,
     this.completed = false,
     this.completedTime,
+    this.statusLabel,
+    this.statusColor,
+    this.isCancelled = false,
+    this.cancelRemarks,
+    this.statusHasChanged = false,
     this.attachments = const [],
     this.comments = const [],
     this.history = const [],
@@ -192,6 +210,16 @@ class TaskModel {
       'updatedAt': updatedAt.millisecondsSinceEpoch,
     };
   }
+
+  /// Label to show: Cancelled, the master status name, or the built-in label.
+  String get statusText => isCancelled
+      ? 'Cancelled'
+      : ((statusLabel ?? '').trim().isNotEmpty
+            ? statusLabel!.trim()
+            : currentStatus.label);
+
+  /// Cancel is allowed only before the status was ever changed.
+  bool get canCancel => !isCancelled && !statusHasChanged && !completed;
 
   /// Effective status, derived from the stored flags (works for legacy tasks).
   TaskStatus get currentStatus {

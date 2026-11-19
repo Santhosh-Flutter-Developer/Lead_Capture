@@ -32,6 +32,22 @@ class ApiConfig {
     return isProduction ? productionBaseUrl : localBaseUrl;
   }
 
+  /// Real-time (socket.io) gateway used for instant notifications.
+  /// Pass the PUBLIC address of the Node gateway with
+  /// `--dart-define=WS_URL=https://host:port` (the server config only knows
+  /// the internal 127.0.0.1:8085). Empty => derived from the API host on
+  /// port 8085; set `--dart-define=WS_URL=off` to disable.
+  static const String _wsOverride = String.fromEnvironment('WS_URL');
+  static bool get wsEnabled => _wsOverride != 'off';
+  static String get wsUrl {
+    if (_wsOverride.isNotEmpty && _wsOverride != 'off') return _wsOverride;
+    final u = Uri.parse(baseUrl);
+    // Web: the site's CSP only allows wss://<host> (port 443), so use the
+    // proxied origin (server must proxy /socket.io/ to the gateway).
+    if (kIsWeb) return '${u.scheme}://${u.host}';
+    return '${u.scheme}://${u.host}:8085';
+  }
+
   /// Origin used to turn relative file paths (e.g. `uploads/profile/a.png`)
   /// returned by the API into absolute URLs. The API folder is `<root>/api`,
   /// uploads are served from `<root>`.

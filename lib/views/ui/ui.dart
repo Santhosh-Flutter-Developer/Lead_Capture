@@ -7,6 +7,7 @@ export 'src/flush_bar.dart';
 export 'src/general_dialog.dart';
 export 'src/error_display.dart';
 export 'src/confirm_dialog.dart';
+export 'src/cancel_remarks_dialog.dart';
 export 'src/back.dart';
 export 'src/custom_dropdown.dart';
 export 'src/access_denied.dart';

@@ -23,6 +23,30 @@ class _TicketEditState extends State<TicketEdit> {
   TicketPriority _priorityLevel = TicketPriority.medium;
   TicketCategory _category = TicketCategory.technicalSupport;
   TicketStatus _status = TicketStatus.open;
+  // Ticket Status master (dynamic). Falls back to the built-in statuses.
+  List<WorkflowStatus> _statuses = [];
+  String _statusKey = 'open';
+
+  /// (key, label) pairs shown in the Ticket Status dropdown.
+  List<(String, String)> get _statusItems => _statuses.isEmpty
+      ? [for (final s in TicketStatus.values) (s.name, s.label)]
+      : [for (final s in _statuses) (s.statusKey, s.name)];
+
+  Future<void> _loadStatuses() async {
+    try {
+      final l = await TicketService.getStatuses();
+      if (!mounted) return;
+      setState(() {
+        _statuses = l;
+        // New ticket: start on the first (initial) master status.
+        if (false && l.isNotEmpty) {
+          _statusKey = l.first.statusKey;
+          _status = TicketService.statusEnumFor(_statusKey);
+        }
+      });
+    } catch (_) {}
+  }
+
   TicketModeOfContact _modeOfContact = TicketModeOfContact.phone;
   final TextEditingController _ticketTitle = TextEditingController();
   final TextEditingController _ticketDescription = TextEditingController();
@@ -79,6 +103,10 @@ class _TicketEditState extends State<TicketEdit> {
       _priorityLevel = _ticketModel!.priorityLevel;
       _category = _ticketModel!.category;
       _status = _ticketModel!.status;
+      _statusKey = (_ticketModel!.statusKey ?? '').isNotEmpty
+          ? _ticketModel!.statusKey!
+          : _ticketModel!.status.name;
+      _loadStatuses();
       _modeOfContact = _ticketModel!.modeOfContact;
       _ticketTitle.text = _ticketModel!.ticketTitle;
       _ticketDescription.text = _ticketModel!.ticketDescription;
@@ -639,19 +667,26 @@ class _TicketEditState extends State<TicketEdit> {
           ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 8),
-        DropdownButtonFormField<TicketStatus>(
-          initialValue: _status,
+        // Dynamic: the statuses come from Creation -> Ticket Status.
+        DropdownButtonFormField<String>(
+          key: ValueKey('ticket-status-$_statusKey-${_statuses.length}'),
+          initialValue: _statusItems.any((e) => e.$1 == _statusKey)
+              ? _statusKey
+              : null,
+          isExpanded: true,
           decoration: InputDecoration(
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             filled: true,
             fillColor: Theme.of(context).colorScheme.surface,
           ),
-          items: TicketStatus.values.map((status) {
-            return DropdownMenuItem(value: status, child: Text(status.label));
+          items: _statusItems.map((e) {
+            return DropdownMenuItem(value: e.$1, child: Text(e.$2));
           }).toList(),
           onChanged: (value) {
+            if (value == null) return;
             setState(() {
-              _status = value!;
+              _statusKey = value;
+              _status = TicketService.statusEnumFor(value);
             });
           },
         ),
@@ -1181,6 +1216,7 @@ class _TicketEditState extends State<TicketEdit> {
           reminder: _selectedReminder,
           category: _category,
           status: _status,
+          statusKey: _statusKey,
           attachments: attachments,
           ticketCreatedBy: await Spdb.getUser(),
           createdAt: _ticketModel!.createdAt,

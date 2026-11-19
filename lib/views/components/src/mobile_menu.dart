@@ -286,6 +286,12 @@ class _MobileMenuState extends State<MobileMenu> {
       case 'lead_status':
         Navigate.route(context, const LeadStatusListing());
         break;
+      case 'task_status':
+        Navigate.route(context, const TaskStatusListing());
+        break;
+      case 'ticket_status':
+        Navigate.route(context, const TicketStatusListing());
+        break;
       case 'deal_status':
         Navigate.route(context, const DealStatusListing());
         break;

@@ -28,6 +28,7 @@ class _TaskStatusPieChartState extends State<TaskStatusPieChart> {
     int completedCount = 0;
 
     for (var task in widget.tasks) {
+      if (task.isCancelled) continue; // cancelled tasks are not counted
       if (task.completed == true) {
         completedCount++;
       } else if (task.hasStarted == true && task.completed == false) {

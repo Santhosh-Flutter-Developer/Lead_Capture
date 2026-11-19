@@ -34,6 +34,8 @@ class MasterTypes {
   static const leadPriority = 'lead_priority';
   static const leadCategory = 'lead_category';
   static const dealStatus = 'deal_status';
+  static const taskStatus = 'task_status';
+  static const ticketStatus = 'ticket_status';
   static const paymentMode = 'payment_mode';
   static const department = 'department';
   static const subDepartment = 'sub_department';

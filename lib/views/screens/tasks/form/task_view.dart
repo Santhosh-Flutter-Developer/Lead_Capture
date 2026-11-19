@@ -45,11 +45,17 @@ class _TaskViewState extends State<TaskView> with TickerProviderStateMixin {
   bool isParticipant = false;
   bool _isActionLoading = false;
   int _statusFieldNonce = 0; // forces the status dropdown to rebuild/reset
+  // Task Status master (Creation -> Task Status); empty until loaded, then the
+  // built-in statuses are used as a fallback so the dropdown never disappears.
+  List<WorkflowStatus> _masters = [];
 
   @override
   void initState() {
     super.initState();
     _future = TaskService.getTask(uid: widget.uid);
+    TaskService.getStatuses().then((l) {
+      if (mounted) setState(() => _masters = l);
+    }).catchError((_) {});
     _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(_onTabChanged);
     Spdb.getUid().then((uid) {
@@ -107,18 +113,30 @@ class _TaskViewState extends State<TaskView> with TickerProviderStateMixin {
     if (mounted) setState(() => _isSending = false);
   }
 
-  /// Changes the task status from the dropdown.
+  static String _norm(String k) =>
+      k.replaceAll(RegExp(r'[\s_-]'), '').toLowerCase();
+
+  WorkflowStatus? get _currentMaster {
+    final k = _norm(_taskModel.status ?? '');
+    if (k.isEmpty) return null;
+    for (final m in _masters) {
+      if (_norm(m.statusKey) == k) return m;
+    }
+    return null;
+  }
+
+  /// Changes the task status from the dropdown (dynamic master statuses).
   /// The service re-validates against the latest server state, so the rules
   /// (one active task, completed is final, etc.) can't be bypassed from here.
-  Future<void> _changeStatus(TaskStatus target) async {
-    if (_taskModel.uid == null) return;
-    if (target == _taskModel.currentStatus) return;
+  Future<void> _changeStatus(WorkflowStatus target) async {
+    if (_taskModel.uid == null || _taskModel.isCancelled) return;
+    if (_norm(target.statusKey) == _norm(_taskModel.status ?? '')) return;
 
-    if (target == TaskStatus.completed) {
+    if (target.isFinal) {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text("Mark as completed?"),
+          title: Text("Mark as ${target.name}?"),
           content: const Text(
             "Once completed, the task is closed and its status can't be changed.",
           ),
@@ -133,7 +151,7 @@ class _TaskViewState extends State<TaskView> with TickerProviderStateMixin {
                 backgroundColor: AppColors.success,
                 foregroundColor: Colors.white,
               ),
-              child: const Text("Complete"),
+              child: Text(target.name),
             ),
           ],
         ),
@@ -149,36 +167,33 @@ class _TaskViewState extends State<TaskView> with TickerProviderStateMixin {
     setState(() => _isActionLoading = true);
 
     try {
-      await TaskService.updateTaskStatus(
+      await TaskService.changeStatus(
         taskId: _taskModel.uid!,
-        newStatus: target,
+        target: target,
+        statuses: _masters,
       );
 
       final now = DateTime.now();
       setState(() {
-        switch (target) {
-          case TaskStatus.completed:
-            _taskModel.completed = true;
-            _taskModel.hasStarted = false;
-            _taskModel.completedTime = now;
-            break;
-          case TaskStatus.started:
-          case TaskStatus.inProgress:
-            _taskModel.startedTime ??= now;
-            _taskModel.hasStarted = true;
-            _taskModel.completed = false;
-            break;
-          case TaskStatus.onHold:
-          case TaskStatus.pending:
-            break;
+        if (target.isFinal) {
+          _taskModel.completed = true;
+          _taskModel.hasStarted = false;
+          _taskModel.completedTime = now;
+        } else if (_norm(target.statusKey) != 'onhold') {
+          _taskModel.startedTime ??= now;
+          _taskModel.hasStarted = true;
+          _taskModel.completed = false;
         }
-        _taskModel.status = target.name;
+        _taskModel.status = target.statusKey;
+        _taskModel.statusLabel = target.name;
+        _taskModel.statusColor = target.color;
+        _taskModel.statusHasChanged = true;
       });
 
       if (!mounted) return;
       FlushBar.show(
         context,
-        "Status updated to ${target.label}",
+        "Status updated to ${target.name}",
         isSuccess: true,
       );
     } catch (e) {
@@ -208,17 +223,6 @@ class _TaskViewState extends State<TaskView> with TickerProviderStateMixin {
       case TaskStatus.completed:
         return AppColors.success;
     }
-  }
-
-  /// Which statuses can be chosen from the current one.
-  /// A task that was never started can only be started; completing or holding
-  /// it first would skip time tracking (same rule as the old Start button).
-  bool _canMoveTo(TaskStatus current, TaskStatus target) {
-    if (target == current) return true;
-    if (current == TaskStatus.pending) {
-      return target == TaskStatus.started || target == TaskStatus.inProgress;
-    }
-    return true;
   }
 
   static const List<Color> _brandGradient = [
@@ -501,7 +505,11 @@ class _TaskViewState extends State<TaskView> with TickerProviderStateMixin {
 
   Widget _buildStatusBadge() {
     final status = _taskModel.currentStatus;
-    final color = _statusColor(status);
+    final color = _taskModel.isCancelled
+        ? AppColors.danger
+        : (_taskModel.statusColor != null
+              ? Color(_taskModel.statusColor!)
+              : _statusColor(status));
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
@@ -510,7 +518,7 @@ class _TaskViewState extends State<TaskView> with TickerProviderStateMixin {
         border: Border.all(color: color.withValues(alpha: 0.2)),
       ),
       child: Text(
-        status.label.toUpperCase(),
+        _taskModel.statusText.toUpperCase(),
         style: TextStyle(
           fontSize: 10,
           fontWeight: FontWeight.w900,
@@ -947,7 +955,9 @@ class _TaskViewState extends State<TaskView> with TickerProviderStateMixin {
 
   Widget _buildTimeTrackingTab() {
     final TimeTrackingState state;
-    switch (_taskModel.currentStatus) {
+    switch (_taskModel.isCancelled
+        ? TaskStatus.completed
+        : _taskModel.currentStatus) {
       case TaskStatus.pending:
         state = TimeTrackingState.notStarted;
         break;
@@ -1095,6 +1105,25 @@ class _TaskViewState extends State<TaskView> with TickerProviderStateMixin {
   }
 
   Widget _buildActionButtons() {
+    if (_taskModel.isCancelled) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            "Task cancelled.",
+            style: TextStyle(
+              color: AppColors.danger,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          if ((_taskModel.cancelRemarks ?? '').isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text("Remarks: ${_taskModel.cancelRemarks}"),
+            ),
+        ],
+      );
+    }
     if (_taskModel.completed) {
       return const Center(
         child: Text(
@@ -1108,33 +1137,25 @@ class _TaskViewState extends State<TaskView> with TickerProviderStateMixin {
     }
     final current = _taskModel.currentStatus;
     final isPending = current == TaskStatus.pending;
+    final cur = _currentMaster;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _buildSectionLabel("STATUS"),
-        const SizedBox(height: 12),
-        DropdownButtonFormField<TaskStatus>(
-          key: ValueKey('task-status-$current-$_statusFieldNonce'),
-          initialValue: isPending ? null : current,
-          isExpanded: true,
-          hint: const Text("Pending - select status"),
-          decoration: InputDecoration(
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            filled: true,
-            fillColor: Theme.of(context).colorScheme.surface,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 14,
-              vertical: 14,
-            ),
-          ),
-          items: TaskStatusX.selectable.map((s) {
-            final enabled = _canMoveTo(current, s);
+    // Master list (dynamic). Falls back to the built-in statuses until the
+    // master has loaded (or if it could not be loaded).
+    final items = _masters.isEmpty
+        ? null
+        : _masters.map((m) {
+            final isInitial = m.uid == _masters.first.uid;
+            final isHold = _norm(m.statusKey) == 'onhold';
+            final isCurrent = cur?.uid == m.uid;
+            // initial status only while pending; pending tasks must be
+            // started first (no direct complete / hold).
+            final enabled = isCurrent ||
+                (!isInitial && !(isPending && (m.isFinal || isHold)));
             final color = enabled
-                ? _statusColor(s)
+                ? m.colorValue
                 : Theme.of(context).disabledColor;
-            return DropdownMenuItem<TaskStatus>(
-              value: s,
+            return DropdownMenuItem<String>(
+              value: m.uid,
               enabled: enabled,
               child: Row(
                 children: [
@@ -1147,23 +1168,55 @@ class _TaskViewState extends State<TaskView> with TickerProviderStateMixin {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  Text(
-                    s.label,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: enabled ? null : Theme.of(context).disabledColor,
+                  Flexible(
+                    child: Text(
+                      m.name,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: enabled ? null : Theme.of(context).disabledColor,
+                      ),
                     ),
                   ),
                 ],
               ),
             );
-          }).toList(),
-          onChanged: _isActionLoading
-              ? null
-              : (value) {
-                  if (value != null) _changeStatus(value);
-                },
-        ),
+          }).toList();
+
+    final decoration = InputDecoration(
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      filled: true,
+      fillColor: Theme.of(context).colorScheme.surface,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildSectionLabel("STATUS"),
+        const SizedBox(height: 12),
+        if (items != null)
+          DropdownButtonFormField<String>(
+            key: ValueKey('task-status-${cur?.uid}-$_statusFieldNonce'),
+            initialValue: cur?.uid,
+            isExpanded: true,
+            hint: Text(
+              "${_masters.first.name} - select status",
+            ),
+            decoration: decoration,
+            items: items,
+            onChanged: _isActionLoading
+                ? null
+                : (value) {
+                    final t = _masters.where((m) => m.uid == value);
+                    if (t.isNotEmpty) _changeStatus(t.first);
+                  },
+          )
+        else
+          Text(
+            _taskModel.statusText,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
         if (_isActionLoading) ...[
           const SizedBox(height: 10),
           const LinearProgressIndicator(minHeight: 2),

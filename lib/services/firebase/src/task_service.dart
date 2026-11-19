@@ -55,14 +55,52 @@ class TaskService {
     }
   }
 
-  static Future<void> deleteTask({required String uid}) async {
+  /// "Delete" = Cancel with remarks (tasks.php `cancel`). The server refuses
+  /// when the status was ever changed and keeps the task in the list.
+  static Future<void> cancelTask({
+    required String uid,
+    required String remarks,
+  }) async {
     try {
-      (await TasksApiService.call('delete', {'uid': uid})).ensureSuccess();
-      ApiLive.changed({'tasks', 'trash'});
+      if (remarks.trim().isEmpty) throw 'Cancellation remarks are required.';
+      (await TasksApiService.call('cancel', {
+        'uid': uid,
+        'remarks': remarks.trim(),
+      })).ensureSuccess();
+      ApiLive.changed({'tasks', 'task_$uid'});
     } catch (e, st) {
       _fail(e, st);
     }
   }
+
+  /// Bulk cancel (`bulk_cancel`). The server cancels only the tasks whose
+  /// status was never changed and returns how many it cancelled in `message`.
+  static Future<String> cancelTasks({
+    required List<String> uids,
+    required String remarks,
+  }) async {
+    try {
+      if (remarks.trim().isEmpty) throw 'Cancellation remarks are required.';
+      final res = (await TasksApiService.call('bulk_cancel', {
+        'uids': uids,
+        'remarks': remarks.trim(),
+      })).ensureSuccess();
+      ApiLive.changed('tasks');
+      return res.message;
+    } catch (e, st) {
+      _fail(e, st);
+    }
+  }
+
+  static Future<void> deleteTask({
+    required String uid,
+    String remarks = '',
+  }) => cancelTask(uid: uid, remarks: remarks);
+
+  /// Task Status master (Creation -> Task Status), ordered. The first one is
+  /// the initial status.
+  static Future<List<WorkflowStatus>> getStatuses() =>
+      WorkflowStatusService.task.getAll();
 
   static Future<void> restoreTask(TaskModel task) async {
     throw 'Restoring a deleted task is not supported by the server yet.';
@@ -129,6 +167,7 @@ class TaskService {
           t.assignees.contains(userId) &&
           t.hasStarted &&
           !t.completed &&
+          !t.isCancelled &&
           t.status != 'onHold');
     } catch (e, st) {
       ErrorService.recordError(e, st);
@@ -169,6 +208,51 @@ class TaskService {
         }
       }
       await _setStatus(taskId, newStatus);
+    } catch (e, st) {
+      _fail(e, st);
+    }
+  }
+
+  static String _normKey(String k) =>
+      k.replaceAll(RegExp(r'[\s_-]'), '').toLowerCase();
+
+  /// Moves the task to a master status picked from the dynamic dropdown.
+  /// [statuses] is the ordered master list (first = initial status).
+  /// Same rules as before: completed / cancelled are final, one active task
+  /// per user, a task can't go back to the initial status.
+  static Future<void> changeStatus({
+    required String taskId,
+    required WorkflowStatus target,
+    required List<WorkflowStatus> statuses,
+  }) async {
+    try {
+      final uid = await Spdb.getUid();
+      if (uid == null) throw 'User not logged in';
+      final task = await getTask(uid: taskId);
+      if (task.isCancelled) throw 'Task is cancelled and its status cannot be changed.';
+      if (task.completed) throw "Completed tasks can't be changed.";
+      if (_normKey(task.status ?? '') == _normKey(target.statusKey)) return;
+
+      final isInitial = statuses.isNotEmpty && statuses.first.uid == target.uid;
+      final isHold = _normKey(target.statusKey) == 'onhold';
+      final pending = task.currentStatus == TaskStatus.pending;
+      final onHold = task.currentStatus == TaskStatus.onHold;
+
+      if (isInitial) throw "A started task can't go back to ${target.name}.";
+      if (pending && target.isFinal) {
+        throw 'Start the task before marking it as completed.';
+      }
+      if (pending && isHold) throw 'Start the task before putting it on hold.';
+      if (!target.isFinal && !isHold && (pending || onHold)) {
+        if (await hasActiveTask(userId: uid, excludeTaskId: taskId)) {
+          throw 'You already have an active task. Complete it first.';
+        }
+      }
+      (await TasksApiService.call('update_status', {
+        'uid': taskId,
+        'status': target.statusKey,
+      })).ensureSuccess();
+      ApiLive.changed({'tasks', 'task_$taskId'});
     } catch (e, st) {
       _fail(e, st);
     }

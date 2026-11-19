@@ -21,6 +21,8 @@ export 'src/payment_report_service.dart';
 export 'src/payment_report_export_service.dart';
 export 'src/windows_notification_service.dart';
 export 'src/deal_status_service.dart';
+export 'src/realtime_service.dart';
+export 'src/workflow_status_service.dart';
 export 'src/deal_service.dart';
 export 'src/task_service.dart';
 export 'src/admin_service.dart';

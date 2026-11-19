@@ -426,6 +426,22 @@ class ChatService {
       final id = Js.s(res.dataMap['chat_uid']);
       if (id.isEmpty) throw 'Chat could not be created';
       ApiLive.changed({'chats'});
+      if (me == userId) {
+        // Personal chat: the server must hand back a chat that only has me.
+        // (Old API matched ANY chat containing me -> messages leaked into
+        // someone else's conversation.) Refuse instead of mis-sending.
+        final chat = await getChat(uid: id) ?? await (() async {
+          await _fetchThreads();
+          return getChat(uid: id);
+        })();
+        final onlyMe = chat != null &&
+            chat.participants.isNotEmpty &&
+            chat.participants.every((p) => p == me);
+        if (!onlyMe) {
+          throw 'Personal chat is not supported by the server yet '
+              '(API: create_direct must create a self chat).';
+        }
+      }
       return id;
     } catch (e, st) {
       await ErrorService.recordError(e, st);
@@ -435,7 +451,6 @@ class ChatService {
 
   static Future<String?> getChatUid(String opponentUserId) async {
     final me = await Spdb.getUid();
-    if (me == opponentUserId) return null;
     return createIndividualChat(userId: opponentUserId);
   }
 

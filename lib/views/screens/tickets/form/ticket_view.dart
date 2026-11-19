@@ -32,11 +32,28 @@ class _TicketViewState extends State<TicketView> with TickerProviderStateMixin {
   bool isParticipant = false;
   bool _isActionLoading = false;
   int _statusFieldNonce = 0; // forces the status dropdown to rebuild/reset
+  // Ticket Status master (Creation -> Ticket Status). Until it loads the
+  // built-in statuses are used so the dropdown never disappears.
+  List<WorkflowStatus> _masters = [];
+
+  static String _norm(String k) =>
+      k.replaceAll(RegExp(r'[\s_-]'), '').toLowerCase();
+
+  WorkflowStatus? get _currentMaster {
+    final k = _norm(_ticketModel.statusKey ?? _ticketModel.status.name);
+    for (final m in _masters) {
+      if (_norm(m.statusKey) == k) return m;
+    }
+    return null;
+  }
 
   @override
   void initState() {
     super.initState();
     _future = TicketService.getTicket(uid: widget.uid);
+    TicketService.getStatuses().then((l) {
+      if (mounted) setState(() => _masters = l);
+    }).catchError((_) {});
     _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(_onTabChanged);
     Spdb.getUid().then((uid) {
@@ -95,21 +112,34 @@ class _TicketViewState extends State<TicketView> with TickerProviderStateMixin {
     if (mounted) setState(() => _isSending = false);
   }
 
-  Future<void> _changeStatus(TicketStatus target) async {
-    if (_ticketModel.uid == null) return;
-    if (target == _ticketModel.status) return;
+  Future<void> _changeStatus(WorkflowStatus target) async {
+    if (_ticketModel.uid == null || _ticketModel.isCancelled) return;
+    if (_norm(target.statusKey) ==
+        _norm(_ticketModel.statusKey ?? _ticketModel.status.name)) {
+      return;
+    }
 
     setState(() => _isActionLoading = true);
     try {
-      await TicketService.updateTicketStatus(
+      await TicketService.changeStatus(
         ticketId: _ticketModel.uid!,
-        newStatus: target,
+        target: target,
       );
       if (!mounted) return;
-      setState(() => _ticketModel.status = target);
+      setState(() {
+        _ticketModel.statusKey = target.statusKey;
+        _ticketModel.statusLabel = target.name;
+        _ticketModel.statusColor = target.color;
+        _ticketModel.statusHasChanged = true;
+        for (final e in TicketStatus.values) {
+          if (_norm(e.name) == _norm(target.statusKey)) {
+            _ticketModel.status = e;
+          }
+        }
+      });
       FlushBar.show(
         context,
-        "Status updated to ${target.label}",
+        "Status updated to ${target.name}",
         isSuccess: true,
       );
     } catch (e) {
@@ -379,22 +409,27 @@ class _TicketViewState extends State<TicketView> with TickerProviderStateMixin {
     );
   }
 
+  Color get _badgeColor => _ticketModel.isCancelled
+      ? AppColors.danger
+      : (_ticketModel.statusColor != null
+            ? Color(_ticketModel.statusColor!)
+            : _getStatusColor(_ticketModel.status));
+
   Widget _buildStatusBadge() {
+    final color = _badgeColor;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: _getStatusColor(_ticketModel.status).withValues(alpha: 0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(
-          color: _getStatusColor(_ticketModel.status).withValues(alpha: 0.2),
-        ),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
       ),
       child: Text(
-        _ticketModel.status.label.toUpperCase(),
+        _ticketModel.statusText.toUpperCase(),
         style: TextStyle(
           fontSize: 10,
           fontWeight: FontWeight.w900,
-          color: _getStatusColor(_ticketModel.status),
+          color: color,
           letterSpacing: 1,
         ),
       ),
@@ -730,7 +765,9 @@ class _TicketViewState extends State<TicketView> with TickerProviderStateMixin {
 
   Widget _buildTimeTrackingTab() {
     final status = _ticketModel.status;
-    final TimeTrackingState state = status.isTimerRunning
+    final TimeTrackingState state = _ticketModel.isCancelled
+        ? TimeTrackingState.stopped
+        : status.isTimerRunning
         ? TimeTrackingState.running
         : status.isTimerPaused
         ? TimeTrackingState.paused
@@ -886,56 +923,86 @@ class _TicketViewState extends State<TicketView> with TickerProviderStateMixin {
   }
 
   Widget _buildStatusSection() {
-    final current = _ticketModel.status;
+    if (_ticketModel.isCancelled) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionLabel("STATUS"),
+          const SizedBox(height: 12),
+          const Text(
+            "Ticket cancelled.",
+            style: TextStyle(
+              color: AppColors.danger,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          if ((_ticketModel.cancelRemarks ?? '').isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text("Remarks: ${_ticketModel.cancelRemarks}"),
+            ),
+        ],
+      );
+    }
+    final cur = _currentMaster;
+    // Resolved / closed tickets are final (server rule).
+    final locked =
+        (cur?.isFinal ?? false) ||
+        _ticketModel.status == TicketStatus.resolved ||
+        _ticketModel.status == TicketStatus.closed;
+    final decoration = InputDecoration(
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      filled: true,
+      fillColor: Theme.of(context).colorScheme.surface,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+    );
+    Widget dot(Color c) => Container(
+      width: 9,
+      height: 9,
+      decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _buildSectionLabel("STATUS"),
         const SizedBox(height: 12),
-        DropdownButtonFormField<TicketStatus>(
-          key: ValueKey('ticket-status-$current-$_statusFieldNonce'),
-          initialValue: current,
-          isExpanded: true,
-          decoration: InputDecoration(
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            filled: true,
-            fillColor: Theme.of(context).colorScheme.surface,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 14,
-              vertical: 14,
-            ),
+        if (_masters.isEmpty)
+          Text(
+            _ticketModel.statusText,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          )
+        else
+          DropdownButtonFormField<String>(
+            key: ValueKey('ticket-status-${cur?.uid}-$_statusFieldNonce'),
+            initialValue: cur?.uid,
+            isExpanded: true,
+            hint: Text(_ticketModel.statusText),
+            decoration: decoration,
+            items: _masters.map((m) {
+              return DropdownMenuItem<String>(
+                value: m.uid,
+                child: Row(
+                  children: [
+                    dot(m.colorValue),
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Text(
+                        m.name,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+            onChanged: (_isActionLoading || locked)
+                ? null
+                : (value) {
+                    final t = _masters.where((m) => m.uid == value);
+                    if (t.isNotEmpty) _changeStatus(t.first);
+                  },
           ),
-          items: TicketStatus.values.map((s) {
-            return DropdownMenuItem<TicketStatus>(
-              value: s,
-              child: Row(
-                children: [
-                  Container(
-                    width: 9,
-                    height: 9,
-                    decoration: BoxDecoration(
-                      color: _getStatusColor(s),
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Flexible(
-                    child: Text(
-                      s.label,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }).toList(),
-          onChanged: _isActionLoading
-              ? null
-              : (value) {
-                  if (value != null) _changeStatus(value);
-                },
-        ),
         if (_isActionLoading) ...[
           const SizedBox(height: 10),
           const LinearProgressIndicator(minHeight: 2),

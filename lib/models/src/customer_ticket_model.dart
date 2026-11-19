@@ -24,6 +24,19 @@ class CustomerTicketModel {
   final DateTime? reminder;
   final TicketCategory category;
   TicketStatus status;
+
+  /// Raw server status key + master (Creation -> Ticket Status) label/color.
+  String? statusKey;
+  String? statusLabel;
+  int? statusColor;
+
+  /// Deleting a ticket cancels it (with remarks); cancelled tickets stay in
+  /// the list but are read-only.
+  bool isCancelled;
+  String? cancelRemarks;
+
+  /// true once the status moved off the initial one (no cancel after that).
+  bool statusHasChanged;
   final List<TicketCommentModel> comments;
   final List<TicketHistoryModel> history;
   final UserDataModel ticketCreatedBy;
@@ -51,6 +64,12 @@ class CustomerTicketModel {
     this.reminder,
     required this.category,
     this.status = TicketStatus.open,
+    this.statusKey,
+    this.statusLabel,
+    this.statusColor,
+    this.isCancelled = false,
+    this.cancelRemarks,
+    this.statusHasChanged = false,
     this.comments = const [],
     this.history = const [],
     required this.ticketCreatedBy,
@@ -255,6 +274,20 @@ class CustomerTicketModel {
         uid,
         json.decode(source) as Map<String, dynamic>,
       );
+
+  /// Label to show: Cancelled, the master status name, or the built-in label.
+  String get statusText => isCancelled
+      ? 'Cancelled'
+      : ((statusLabel ?? '').trim().isNotEmpty
+            ? statusLabel!.trim()
+            : status.label);
+
+  /// Cancel is allowed only before the status was ever changed.
+  bool get canCancel =>
+      !isCancelled &&
+      !statusHasChanged &&
+      status != TicketStatus.resolved &&
+      status != TicketStatus.closed;
 
   @override
   String toString() {

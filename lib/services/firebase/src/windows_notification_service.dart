@@ -5,6 +5,7 @@ import 'package:local_notifier/local_notifier.dart';
 import 'package:window_manager/window_manager.dart';
 import '/services/services.dart';
 import '/app/app.dart';
+import '/constants/constants.dart';
 import '/views/views.dart';
 
 final AudioPlayer _player = AudioPlayer();
@@ -15,6 +16,39 @@ class FirestoreNotificationListener {
   static final Set<String> _shownIds = {};
   static Timer? _timer;
   static bool _primed = false;
+
+  /// true the first time [id] is seen (shared by the poller and WebSocket so a
+  /// notification is never shown twice).
+  static bool claim(String id) => id.isNotEmpty && _shownIds.add(id);
+
+  /// Shows a notification that arrived over the WebSocket instantly.
+  static Future<void> showFromSocket(Map<String, dynamic> data) async {
+    final me = (await Spdb.getUid())?.trim() ?? '';
+    final n = CrmMappers.notification(data, myUid: me);
+    if (!claim(n.uid ?? '')) return;
+    final notification = LocalNotification(
+      title: n.title.isEmpty ? 'New Notification' : n.title,
+      body: n.body.isEmpty ? 'You have a new message' : n.body,
+    );
+    notification.onClick = () async {
+      await windowManager.focus();
+      await windowManager.show();
+      final t = n.type?.name ?? '';
+      if (t == 'chat' || t == 'task' || t == 'ticket') {
+        NotificationService.instance.openFromPayload({...n.payload, 'type': t});
+        return;
+      }
+      final navigator = navigatorKey.currentState;
+      if (navigator == null) return;
+      final isAdmin = await Spdb.isAdminLoggedIn();
+      navigator.pushAndRemoveUntil(
+        CupertinoPageRoute(builder: (_) => MainScreen(isAdmin: isAdmin)),
+        (route) => false,
+      );
+    };
+    notification.show();
+    _playSound();
+  }
 
   /// Stops polling (call on logout).
   static Future<void> stopListening() async {
@@ -31,6 +65,9 @@ class FirestoreNotificationListener {
 
     Future<void> poll() async {
       try {
+        // WebSocket delivers instantly (RealtimeService); poll only as a
+        // fallback while it is down (or for the very first priming call).
+        if (_primed && CrmSocketService.instance.isConnected) return;
         final current = (await Spdb.getUid())?.trim();
         if (current != uid) {
           await stopListening();
@@ -45,7 +82,7 @@ class FirestoreNotificationListener {
           if (id.isEmpty || _shownIds.contains(id)) continue;
           _shownIds.add(id);
           if (!_primed) continue; // first poll only records what exists
-          if (n.readBy.contains(uid) || n.senderId == uid) continue;
+          if (n.readBy.contains(uid)) continue;
           final created = n.createdAt;
           if (created != null && DateTime.now().difference(created).inSeconds > 120) continue;
 

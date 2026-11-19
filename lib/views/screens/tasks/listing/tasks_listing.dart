@@ -106,7 +106,7 @@ class _TaskListingViewState extends State<TaskListingView> {
   // ---------------------------------------------------------------------
   // Filters: Status, Assignee, Created By, Deadline range
   // ---------------------------------------------------------------------
-  TaskStatus? _fStatus;
+  String? _fStatus; // status label (master name or Cancelled)
   String? _fAssigneeUid;
   String? _fAssigneeName;
   String? _fCreatedByUid;
@@ -136,10 +136,20 @@ class _TaskListingViewState extends State<TaskListingView> {
   Map<String, String> _legacyLeadNames = {}; // old CRM lead uid -> name
   Map<String, String> _projectLeads = {}; // project uid -> Project Lead uid
 
-  static final Map<String, TaskStatus> _statusOpts = {
-    for (final s in TaskStatus.values) s.label: s,
-  };
-  static final List<String> _statusItems = _statusOpts.keys.toList();
+  // Status filter options come from the Task Status master (+ Cancelled).
+  // Built-in labels are the fallback until / unless the master loads.
+  List<String> _statusItems = [
+    for (final s in TaskStatus.values) s.label,
+    'Cancelled',
+  ];
+
+  Future<void> _loadStatusOptions() async {
+    try {
+      final l = await TaskService.getStatuses();
+      if (!mounted || l.isEmpty) return;
+      setState(() => _statusItems = [...l.map((e) => e.name), 'Cancelled']);
+    } catch (_) {}
+  }
 
   int get _activeFilterCount =>
       (_fStatus != null ? 1 : 0) +
@@ -156,7 +166,10 @@ class _TaskListingViewState extends State<TaskListingView> {
       t.taskCreatedBy.uid.isNotEmpty ? [t.taskCreatedBy.uid] : t.createdBy;
 
   bool _matchesFilters(TaskModel t) {
-    if (_fStatus != null && t.currentStatus != _fStatus) return false;
+    if (_fStatus != null &&
+        t.statusText.toLowerCase() != _fStatus!.toLowerCase()) {
+      return false;
+    }
     if (_fAssigneeUid != null && !t.assignees.contains(_fAssigneeUid)) {
       return false;
     }
@@ -321,6 +334,7 @@ class _TaskListingViewState extends State<TaskListingView> {
     super.initState();
     _loadPermissions();
     _loadLookups();
+    _loadStatusOptions();
   }
 
   /// Project names (Project column / filter) and legacy lead names.
@@ -582,7 +596,7 @@ class _TaskListingViewState extends State<TaskListingView> {
         _gradientButton(
           context: context,
           icon: Iconsax.trash,
-          label: "Delete (${_selectedTasks.length})",
+          label: "Cancel (${_selectedTasks.length})",
           colors: const [Color(0xFFDC3545), Color(0xFFFF6B6B)],
           onPressed: _bulkDelete,
         ),
@@ -637,10 +651,10 @@ class _TaskListingViewState extends State<TaskListingView> {
       FormDropdownSearch(
         key: ValueKey('f_status_$_filterEpoch'),
         label: 'Status',
-        initialItem: _fStatus?.label,
+        initialItem: _fStatus,
         items: _statusItems,
         onChanged: (v) {
-          setState(() => _fStatus = v == null ? null : _statusOpts[v as String]);
+          setState(() => _fStatus = v as String?);
           _applyFilters(controllerRead);
         },
       ),
@@ -1002,14 +1016,18 @@ class _TaskListingViewState extends State<TaskListingView> {
 
   Widget _statusPill(BuildContext context, TaskModel task) {
     final status = task.currentStatus;
-    final color = switch (status) {
-      TaskStatus.completed => AppColors.success,
-      TaskStatus.onHold => AppColors.blueGrey,
-      TaskStatus.inProgress => AppColors.primary,
-      TaskStatus.started => AppColors.info,
-      TaskStatus.pending => AppColors.warning,
-    };
-    final label = status.label;
+    final color = task.isCancelled
+        ? AppColors.danger
+        : task.statusColor != null
+        ? Color(task.statusColor!)
+        : switch (status) {
+            TaskStatus.completed => AppColors.success,
+            TaskStatus.onHold => AppColors.blueGrey,
+            TaskStatus.inProgress => AppColors.primary,
+            TaskStatus.started => AppColors.info,
+            TaskStatus.pending => AppColors.warning,
+          };
+    final label = task.statusText;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -1091,11 +1109,38 @@ class _TaskListingViewState extends State<TaskListingView> {
       },
       cells: [
         dataCell(
-          Text(
-            task.taskNumber?.toString() ?? '-',
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                task.taskNumber?.toString() ?? '-',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              // Cancelled tasks stay in the list, flagged under the number.
+              if (task.isCancelled)
+                Container(
+                  margin: const EdgeInsets.only(top: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.danger.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Text(
+                    'CANCEL',
+                    style: TextStyle(
+                      color: AppColors.danger,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+            ],
           ),
           task.uid ?? '',
         ),
@@ -1177,7 +1222,7 @@ class _TaskListingViewState extends State<TaskListingView> {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (permissions?.canEdit ?? false)
+              if ((permissions?.canEdit ?? false) && !task.isCancelled)
                 _iconCircleButton(
                   context,
                   icon: Iconsax.edit,
@@ -1198,9 +1243,17 @@ class _TaskListingViewState extends State<TaskListingView> {
                 _iconCircleButton(
                   context,
                   icon: Iconsax.trash,
-                  tooltip: "Delete $_pageTitle",
-                  background: AppColors.danger.withValues(alpha: 0.12),
-                  iconColor: AppColors.danger,
+                  tooltip: task.isCancelled
+                      ? "Already cancelled"
+                      : task.canCancel
+                      ? "Cancel $_pageTitle"
+                      : "Status already changed – can't be cancelled",
+                  background: AppColors.danger.withValues(
+                    alpha: task.canCancel ? 0.12 : 0.05,
+                  ),
+                  iconColor: task.canCancel
+                      ? AppColors.danger
+                      : AppColors.danger.withValues(alpha: 0.35),
                   onPressed: () => _onDeleteTap(task),
                 ),
               ],
@@ -1211,34 +1264,27 @@ class _TaskListingViewState extends State<TaskListingView> {
     );
   }
 
+  /// "Delete" = Cancel with remarks. Not possible once the status changed.
   Future<void> _onDeleteTap(TaskModel task) async {
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => ConfirmDialog(
-        title: 'Delete $_pageTitle',
-        content: 'Are you sure you want to delete this task?',
-      ),
-    );
-
-    if (result != true) return;
-    if (!mounted) return;
-
-    try {
-      final deletedTask = task;
-
-      await TaskService.deleteTask(uid: task.uid ?? '');
-
-      if (!mounted) return;
-
+    if (task.isCancelled) {
+      FlushBar.show(context, 'This task is already cancelled.', isSuccess: false);
+      return;
+    }
+    if (!task.canCancel) {
       FlushBar.show(
         context,
-        '$_pageTitle deleted successfully',
-        actionLabel: 'UNDO',
-        onActionPressed: () async {
-          await TaskService.restoreTask(deletedTask);
-          context.read<TaskBloc>().add(StreamTasks());
-        },
+        "Status has already been changed – this task can't be cancelled.",
+        isSuccess: false,
       );
+      return;
+    }
+    final remarks = await showCancelRemarksDialog(context, entity: 'task');
+    if (remarks == null || !mounted) return;
+
+    try {
+      await TaskService.cancelTask(uid: task.uid ?? '', remarks: remarks);
+      if (!mounted) return;
+      FlushBar.show(context, '$_pageTitle cancelled successfully');
     } catch (e, st) {
       await ErrorService.recordError(e, st);
       if (!mounted) return;
@@ -1248,52 +1294,43 @@ class _TaskListingViewState extends State<TaskListingView> {
 
   Future<void> _bulkDelete() async {
     if (_selectedTasks.isEmpty) return;
+    final eligible = _selectedTasks.where((t) => t.canCancel).toList();
+    final skipped = _selectedTasks.length - eligible.length;
+    if (eligible.isEmpty) {
+      FlushBar.show(
+        context,
+        "Selected tasks are already cancelled or their status has changed – they can't be cancelled.",
+        isSuccess: false,
+      );
+      return;
+    }
 
-    final result = await showDialog(
-      context: context,
-      builder: (context) => ConfirmDialog(
-        title: 'Delete',
-        content: 'Are you sure want to delete this $_pageTitle?',
-      ),
-      barrierDismissible: false,
+    final remarks = await showCancelRemarksDialog(
+      context,
+      entity: 'task',
+      count: eligible.length,
     );
-
-    if (result != true) return;
-    if (!mounted) return;
+    if (remarks == null || !mounted) return;
 
     try {
-      final deletedTasks = List<TaskModel>.from(_selectedTasks);
-
       futureLoading(context);
-
-      for (var task in deletedTasks) {
-        await TaskService.deleteTask(uid: task.uid ?? '');
-      }
-
-      if (Navigator.canPop(context)) {
-        Navigator.pop(context);
-      }
+      final msg = await TaskService.cancelTasks(
+        uids: eligible.map((t) => t.uid ?? '').toList(),
+        remarks: remarks,
+      );
+      if (Navigator.canPop(context)) Navigator.pop(context);
 
       _selectedTasks.clear();
+      context.read<PaginatedDataController<TaskModel>>().clearSelection();
       setState(() {});
 
       if (!mounted) return;
-
       FlushBar.show(
         context,
-        '$_pageTitle deleted successfully',
-        actionLabel: 'UNDO',
-        onActionPressed: () async {
-          for (var task in deletedTasks) {
-            await TaskService.restoreTask(task);
-          }
-          context.read<TaskBloc>().add(StreamTasks());
-        },
+        skipped > 0 ? '$msg ($skipped skipped – status already changed)' : msg,
       );
     } catch (e) {
-      if (Navigator.canPop(context)) {
-        Navigator.pop(context);
-      }
+      if (Navigator.canPop(context)) Navigator.pop(context);
       if (!mounted) return;
       FlushBar.show(context, e.toString(), isSuccess: false);
     }

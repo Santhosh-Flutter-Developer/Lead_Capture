@@ -287,6 +287,13 @@ class CrmMappers {
       status: status,
       completed: Js.b(m['completed']),
       completedTime: Js.dt(m['completed_time']),
+      statusLabel: Js.opt(m['status_label']),
+      statusColor: Js.opt(m['status_color']) == null
+          ? null
+          : ApiMappers.colorFromServer(m['status_color']),
+      isCancelled: Js.b(m['is_cancelled']),
+      cancelRemarks: Js.opt(m['cancel_remarks']),
+      statusHasChanged: Js.b(m['status_has_changed']),
       attachments: files(m['attachments']),
       taskCreatedBy: UserDataModel(
         uid: createdByUid,
@@ -370,6 +377,14 @@ class CrmMappers {
       reminder: Js.dt(m['reminder']),
       category: ticketCategory(m['category']),
       status: _enumByName(TicketStatus.values, m['status'], TicketStatus.open),
+      statusKey: Js.opt(m['status']),
+      statusLabel: Js.opt(m['status_label']),
+      statusColor: Js.opt(m['status_color']) == null
+          ? null
+          : ApiMappers.colorFromServer(m['status_color']),
+      isCancelled: Js.b(m['is_cancelled']),
+      cancelRemarks: Js.opt(m['cancel_remarks']),
+      statusHasChanged: Js.b(m['status_has_changed']),
       ticketCreatedBy: UserDataModel(
         uid: createdByUid,
         name: Js.s(m['created_by_name']),

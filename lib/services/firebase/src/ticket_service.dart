@@ -25,7 +25,8 @@ class TicketService {
     'observers': t.observers,
     'priority_level': t.priorityLevel.name,
     'category': t.category.label,
-    'status': t.status.name,
+    // Raw master key (custom statuses like "reopen" have no enum value).
+    'status': (t.statusKey ?? '').isNotEmpty ? t.statusKey : t.status.name,
     'deadline': t.deadline?.toIso8601String(),
     'reminder': t.reminder?.toIso8601String(),
     'project': t.project ?? '',
@@ -54,10 +55,71 @@ class TicketService {
     }
   }
 
-  static Future<void> deleteTicket({required String uid}) async {
+  /// "Delete" = Cancel with remarks (tickets.php `cancel`). The server
+  /// refuses when the status was ever changed; the ticket stays in the list.
+  static Future<void> cancelTicket({
+    required String uid,
+    required String remarks,
+  }) async {
     try {
-      (await TicketsApiService.call('delete', {'uid': uid})).ensureSuccess();
-      ApiLive.changed({'tickets', 'trash'});
+      if (remarks.trim().isEmpty) throw 'Cancellation remarks are required.';
+      (await TicketsApiService.call('cancel', {
+        'uid': uid,
+        'remarks': remarks.trim(),
+      })).ensureSuccess();
+      ApiLive.changed({'tickets', 'ticket_$uid'});
+    } catch (e, st) {
+      _fail(e, st);
+    }
+  }
+
+  /// Bulk cancel (`bulk_cancel`); returns the server message.
+  static Future<String> cancelTickets({
+    required List<String> uids,
+    required String remarks,
+  }) async {
+    try {
+      if (remarks.trim().isEmpty) throw 'Cancellation remarks are required.';
+      final res = (await TicketsApiService.call('bulk_cancel', {
+        'uids': uids,
+        'remarks': remarks.trim(),
+      })).ensureSuccess();
+      ApiLive.changed('tickets');
+      return res.message;
+    } catch (e, st) {
+      _fail(e, st);
+    }
+  }
+
+  static Future<void> deleteTicket({
+    required String uid,
+    String remarks = '',
+  }) => cancelTicket(uid: uid, remarks: remarks);
+
+  /// Built-in enum for a master key (custom keys fall back to `open`).
+  static TicketStatus statusEnumFor(String key) {
+    final k = key.replaceAll(RegExp(r'[\s_-]'), '').toLowerCase();
+    for (final e in TicketStatus.values) {
+      if (e.name.toLowerCase() == k) return e;
+    }
+    return TicketStatus.open;
+  }
+
+  /// Ticket Status master (Creation -> Ticket Status), ordered.
+  static Future<List<WorkflowStatus>> getStatuses() =>
+      WorkflowStatusService.ticket.getAll();
+
+  /// Moves the ticket to a master status chosen in the dynamic dropdown.
+  static Future<void> changeStatus({
+    required String ticketId,
+    required WorkflowStatus target,
+  }) async {
+    try {
+      (await TicketsApiService.call('update_status', {
+        'uid': ticketId,
+        'status': target.statusKey,
+      })).ensureSuccess();
+      ApiLive.changed({'tickets', 'ticket_$ticketId'});
     } catch (e, st) {
       _fail(e, st);
     }

@@ -61,6 +61,8 @@ class _CreateChatState extends State<CreateChat>
       _employees.clear();
       _admins.clear();
 
+      // The logged-in user is listed too: chatting with yourself is a
+      // personal "message yourself" chat.
       var employees = await EmployeeService.getAllEmployees();
       var admins = await AdminService.getAllAdmins();
 

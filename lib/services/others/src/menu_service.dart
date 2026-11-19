@@ -117,6 +117,22 @@ class MenuService {
           //   route: '/employee-status',
           //   requiredPermissions: ['Employee Status'],
           // ),
+          // Masters for the Tasks / Tickets modules. Visible only to roles
+          // that were granted the page (admin sees all).
+          MenuItem(
+            id: 'task_status',
+            title: 'Task Status',
+            icon: Iconsax.task,
+            route: '/task-status',
+            requiredPermissions: ['Task Status'],
+          ),
+          MenuItem(
+            id: 'ticket_status',
+            title: 'Ticket Status',
+            icon: Iconsax.ticket,
+            route: '/ticket-status',
+            requiredPermissions: ['Ticket Status'],
+          ),
           MenuItem(
             id: 'employees',
             title: 'Employees',
@@ -459,6 +475,8 @@ class MenuService {
       'Lead Priority',
       'Lead Status',
       'Deal Status',
+      'Task Status',
+      'Ticket Status',
       'Payment Mode',
       'Leads',
       'Deals',

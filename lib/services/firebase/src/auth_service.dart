@@ -223,6 +223,26 @@ class AuthService {
   /// Logout cleanup: ends the PHP session (marks offline, clears token) and
   /// deletes the FCM token on the device. Never throws.
   static Future<void> removeCurrentDeviceFcm() async {
+    // Needs the session, so it runs before logout.
+    try {
+      final supports = kIsWeb ||
+          defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS;
+      if (supports) {
+        final tokens = <String>{...NotificationService.instance.registeredTokens};
+        try {
+          final t = await FirebaseMessaging.instance
+              .getToken(vapidKey: kIsWeb ? kVapidKey : null);
+          if ((t ?? '').isNotEmpty) tokens.add(t!);
+        } catch (_) {}
+        for (final t in tokens) {
+          try {
+            await NotificationsApiService.unregisterFcmToken(t);
+          } catch (_) {} // one failing token must not block logout
+        }
+        NotificationService.instance.registeredTokens.clear();
+      }
+    } catch (_) {}
     try {
       await AuthApiService.logout();
     } catch (e, st) {

@@ -19,7 +19,7 @@
 // ── Lifecycle: always run the newest worker immediately ──────────────────────
 // Without this, a cached older copy of this file can keep handling clicks
 // after an update, and the new click handler never runs.
-var SW_VERSION = 'lc-sw-v5';
+var SW_VERSION = 'lc-sw-v6';
 
 // Sends a status line to the page (printed in the `flutter run` console by
 // diagnoseServiceWorker in notification_service_web.dart).
@@ -58,6 +58,8 @@ self.addEventListener('notificationclick', function (event) {
   event.notification.close();
 
   var data = event.notification.data || {};
+  // Browser-displayed FCM notifications keep the payload under FCM_MSG.
+  if (data.FCM_MSG && data.FCM_MSG.data) data = data.FCM_MSG.data;
   var isChat = data.type === 'chat' && data.chatId;
   // Open under the app's own base path (the registration scope, e.g.
   // /shanmugam/leadcapture/), not the site root.
@@ -133,6 +135,9 @@ const messaging = firebase.messaging();
 // or the browser is closed. It shows a system notification.
 messaging.onBackgroundMessage(function (payload) {
   console.log('[SW ' + SW_VERSION + '] Background message received:', payload);
+  // The server sends a `notification` block, so the browser/FCM already shows
+  // it. Showing it here too would pop up every push twice.
+  if (payload && payload.notification) return;
   report('push shown by this worker', payload && payload.data ? { type: payload.data.type, chatId: payload.data.chatId } : null);
 
   const notificationTitle =

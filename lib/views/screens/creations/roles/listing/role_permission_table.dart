@@ -31,6 +31,10 @@ IconData rolePageIcon(String page) {
       return Iconsax.flag;
     case 'Deal Status':
       return Iconsax.chart_success;
+    case 'Task Status':
+      return Iconsax.task_square;
+    case 'Ticket Status':
+      return Iconsax.ticket;
     case 'Leads':
       return Iconsax.personalcard;
     case 'Deals':

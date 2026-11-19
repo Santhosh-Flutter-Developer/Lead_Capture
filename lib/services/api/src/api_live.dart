@@ -62,10 +62,17 @@ class ApiLive {
   /// Emits [fetch]() now, again on every [changed] of one of [keys], and
   /// every [interval]. Errors are forwarded to the stream (so BLoC onError
   /// still works); polling continues after an error.
+  /// Set by RealtimeService: true while the WebSocket is connected. The
+  /// server then pushes changes (-> [changed]), so the timer only runs as a
+  /// slow safety net instead of every [interval].
+  static bool Function() socketConnected = () => false;
+  static const _socketSlowFactor = 6; // 30 s -> every 3 min
+
   static Stream<T> watch<T>(
     Set<String> keys,
     Future<T> Function() fetch, {
     Duration interval = const Duration(seconds: 30),
+    bool slowWithSocket = true,
   }) {
     late StreamController<T> ctrl;
     T? last;
@@ -111,7 +118,14 @@ class ApiLive {
       onListen: () {
         run();
         sub = _bus.stream.where(keys.contains).listen((_) => run());
-        if (interval > Duration.zero) timer = Timer.periodic(interval, (_) => run());
+        if (interval > Duration.zero) {
+          var tick = 0;
+          timer = Timer.periodic(interval, (_) {
+            tick++;
+            if (slowWithSocket && socketConnected() && tick % _socketSlowFactor != 0) return;
+            run();
+          });
+        }
       },
       onCancel: () async {
         timer?.cancel();

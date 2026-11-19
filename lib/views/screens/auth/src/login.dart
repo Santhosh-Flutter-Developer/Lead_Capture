@@ -132,6 +132,7 @@ class _LoginState extends State<Login> with SingleTickerProviderStateMixin {
           if (kIsDesktop) {
             FirestoreNotificationListener.listenForNotifications();
           }
+          RealtimeService.start(); // WebSocket (instant notifications)
           Navigate.routeReplace(context, MainScreen(isAdmin: false));
           return;
         }
@@ -150,6 +151,7 @@ class _LoginState extends State<Login> with SingleTickerProviderStateMixin {
         if (kIsDesktop) {
           FirestoreNotificationListener.listenForNotifications();
         }
+        RealtimeService.start(); // WebSocket (instant notifications)
         Navigate.routeReplace(context, MainScreen(isAdmin: true));
       } catch (e, st) {
         // if (Navigator.canPop(context)) {

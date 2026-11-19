@@ -14,4 +14,9 @@ class NotificationsApiService {
     required String deviceType,
   }) =>
       call('register_fcm_token', {'fcm_token': token, 'device_type': deviceType});
+
+  /// Removes this device's token on logout so the next user on the same
+  /// device does not get the previous user's pushes (and vice versa).
+  static Future<ApiResponse> unregisterFcmToken(String token) =>
+      call('unregister_fcm_token', {'fcm_token': token});
 }

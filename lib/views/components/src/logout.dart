@@ -9,6 +9,10 @@ Future<void> _clearSession() async {
   try {
     await FirestoreNotificationListener.stopListening(); // Windows
   } catch (_) {}
+  try {
+    await RealtimeService.stop(); // WebSocket
+  } catch (_) {}
+  UserStatusService.reset();
   await AuthService.removeCurrentDeviceFcm(); // Android / iOS / Web token
   await Spdb.clearDb();
 }
