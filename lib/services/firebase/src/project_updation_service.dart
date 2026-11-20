@@ -95,14 +95,30 @@ class ProjectUpdationService {
     }
   }
 
-  static Future<void> deleteUpdation({required String uid}) async {
+  /// Deleting an updation = cancelling it with remarks (project_updations.php
+  /// action `cancel`). The row stays in the list, read-only, as Cancelled.
+  static Future<void> cancelUpdation({required String uid, required String remarks}) async {
     try {
-      (await ProjectUpdationsApiService.call('delete', {'uid': uid})).ensureSuccess();
-      ApiLive.changed({'updations', 'trash'});
+      (await ProjectUpdationsApiService.call('cancel', {'uid': uid, 'remarks': remarks.trim()})).ensureSuccess();
+      ApiLive.changed('updations');
     } catch (e, st) {
       _fail(e, st);
     }
   }
+
+  /// `bulk_cancel`: returns the server message (it skips already cancelled).
+  static Future<String> cancelUpdations({required List<String> uids, required String remarks}) async {
+    try {
+      final res = (await ProjectUpdationsApiService.call('bulk_cancel', {'uids': uids, 'remarks': remarks.trim()})).ensureSuccess();
+      ApiLive.changed('updations');
+      return res.message;
+    } catch (e, st) {
+      _fail(e, st);
+    }
+  }
+
+  static Future<void> deleteUpdation({required String uid, String remarks = ''}) =>
+      cancelUpdation(uid: uid, remarks: remarks);
 
   static Future<void> restoreUpdation(ProjectUpdationModel updation) async {
     throw 'Restoring a deleted updation is not supported by the server yet.';

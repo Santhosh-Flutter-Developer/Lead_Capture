@@ -344,7 +344,7 @@ class _ProjectUpdationCalendarState extends State<ProjectUpdationCalendar> {
         final accent = _accentFor(e);
         return LeadCard(
           title: e.title,
-          category: e.status.label,
+          category: e.statusText,
           categoryColor: accent.withValues(alpha: 0.12),
           textColor: accent,
           accentColor: accent,

@@ -192,7 +192,12 @@ class _ProjectUpdationListingState extends State<ProjectUpdationListing> {
   void _applyFilters() {
     var list = _all.where((u) {
       if (!_matchesSearch(u, _searchController.text)) return false;
-      if (_status != null && u.status.label != _status) return false;
+      if (_status == 'Cancelled') {
+        if (!u.isCancelled) return false;
+      } else if (_status != null &&
+          (u.isCancelled || u.status.label != _status)) {
+        return false;
+      }
       if (_client != null && (u.companyName ?? '') != _client) return false;
       if (_project != null && u.projectName != _project) return false;
       if (_createdBy != null && u.createdBy.name != _createdBy) return false;
@@ -237,6 +242,14 @@ class _ProjectUpdationListingState extends State<ProjectUpdationListing> {
 
   // ---------------------------------------------------------------- actions
   Future<void> _openForm({String? uid}) async {
+    if (uid != null) {
+      final cur = _all.where((x) => x.uid == uid).toList();
+      if (cur.isNotEmpty && cur.first.isCancelled) {
+        FlushBar.show(context, 'Cancelled project updations cannot be edited.',
+            isSuccess: false);
+        return;
+      }
+    }
     final form = ProjectUpdationForm(uid: uid);
     final result = (kIsMobile || _compact)
         ? await Sheet.showSheet(context, widget: form)
@@ -252,27 +265,31 @@ class _ProjectUpdationListingState extends State<ProjectUpdationListing> {
     return ok == true;
   }
 
+  /// Delete = Cancel with remarks (not allowed once the status changed).
   Future<void> _delete(ProjectUpdationModel u) async {
-    if (!await _confirm(
-      'Delete $_pageTitle',
-      'Are you sure you want to delete ${u.updationCode}?',
-    )) {
-      return;
-    }
-    try {
-      final copy = u.copyWith();
-      await ProjectUpdationService.deleteUpdation(uid: u.uid ?? '');
-      await _load();
-      if (!mounted) return;
+    if (!u.canCancel) {
       FlushBar.show(
         context,
-        'Project updation deleted',
-        actionLabel: 'UNDO',
-        onActionPressed: () async {
-          await ProjectUpdationService.restoreUpdation(copy);
-          await _load();
-        },
+        u.isCancelled
+            ? 'This project updation is already cancelled.'
+            : 'Status was already changed, so it cannot be cancelled.',
+        isSuccess: false,
       );
+      return;
+    }
+    final remarks = await showCancelRemarksDialog(
+      context,
+      entity: 'project updation',
+    );
+    if (remarks == null || !mounted) return;
+    try {
+      await ProjectUpdationService.cancelUpdation(
+        uid: u.uid ?? '',
+        remarks: remarks,
+      );
+      await _load();
+      if (!mounted) return;
+      FlushBar.show(context, 'Project updation cancelled');
     } catch (e) {
       if (mounted) FlushBar.show(context, '$e', isSuccess: false);
     }
@@ -282,37 +299,34 @@ class _ProjectUpdationListingState extends State<ProjectUpdationListing> {
       _filtered.where((u) => _controller.selectedIds.contains(u.uid)).toList();
 
   Future<void> _bulkDelete() async {
-    final chosen = _selectedModels();
-    if (chosen.isEmpty) return;
-    if (!await _confirm(
-      'Delete $_pageTitle',
-      'Are you sure you want to delete ${chosen.length} project updations?',
-    )) {
+    final chosen = _selectedModels().where((u) => u.canCancel).toList();
+    if (chosen.isEmpty) {
+      if (mounted) {
+        FlushBar.show(
+          context,
+          'Selected project updations cannot be cancelled.',
+          isSuccess: false,
+        );
+      }
       return;
     }
-    final deleted = <ProjectUpdationModel>[];
+    final remarks = await showCancelRemarksDialog(
+      context,
+      entity: 'project updation',
+      count: chosen.length,
+    );
+    if (remarks == null || !mounted) return;
     try {
-      for (final u in chosen) {
-        await ProjectUpdationService.deleteUpdation(uid: u.uid ?? '');
-        deleted.add(u.copyWith());
-      }
+      final msg = await ProjectUpdationService.cancelUpdations(
+        uids: chosen.map((u) => u.uid ?? '').toList(),
+        remarks: remarks,
+      );
+      _controller.deselectAll(chosen.map((u) => u.uid ?? ''));
+      await _load();
+      if (mounted) FlushBar.show(context, msg);
     } catch (e) {
       if (mounted) FlushBar.show(context, '$e', isSuccess: false);
     }
-    _controller.deselectAll(deleted.map((u) => u.uid ?? ''));
-    await _load();
-    if (!mounted || deleted.isEmpty) return;
-    FlushBar.show(
-      context,
-      '${deleted.length} project updations deleted',
-      actionLabel: 'UNDO',
-      onActionPressed: () async {
-        for (final u in deleted) {
-          await ProjectUpdationService.restoreUpdation(u);
-        }
-        await _load();
-      },
-    );
   }
 
   /// Board drag: persist the new status. Throws so the board can revert.
@@ -358,7 +372,7 @@ class _ProjectUpdationListingState extends State<ProjectUpdationListing> {
             u.title,
             u.description,
             _dateFmt.format(u.requestedDate),
-            u.status.label,
+            u.statusText,
             u.value?.toStringAsFixed(2) ?? '',
             u.notes,
             u.createdBy.name,
@@ -604,7 +618,7 @@ class _ProjectUpdationListingState extends State<ProjectUpdationListing> {
       _filterDropdown(
         label: 'Status',
         value: _status,
-        items: UpdationStatus.values.map((s) => s.label).toList(),
+        items: [...UpdationStatus.values.map((s) => s.label), 'Cancelled'],
         onChanged: (v) {
           _status = v;
           _applyFilters();
@@ -1085,7 +1099,7 @@ class _ProjectUpdationListingState extends State<ProjectUpdationListing> {
           ElevatedButton.icon(
             onPressed: count == 0 ? null : _bulkDelete,
             icon: const Icon(Iconsax.trash, size: 18),
-            label: Text('Delete ($count)'),
+            label: Text('Cancel ($count)'),
             style: ElevatedButton.styleFrom(
               elevation: 0,
               shape: RoundedRectangleBorder(
@@ -1209,22 +1223,27 @@ class _ProjectUpdationListingState extends State<ProjectUpdationListing> {
     );
   }
 
-  Widget _statusPill(UpdationStatus s) {
-    final color = _statusColor(s);
-    return Container(
+  Widget _statusPill(ProjectUpdationModel u) {
+    final s = u.status;
+    final color = u.isCancelled ? const Color(0xFFDC2626) : _statusColor(s);
+    return Tooltip(
+      message: (u.isCancelled && u.cancelRemarks.isNotEmpty)
+          ? 'Cancelled: ${u.cancelRemarks}'
+          : u.statusText,
+      child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
-        s.label,
+        u.statusText,
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
           color: color,
           fontWeight: FontWeight.w700,
         ),
       ),
-    );
+    ));
   }
 
   DataRow _buildDataRow(
@@ -1260,13 +1279,13 @@ class _ProjectUpdationListingState extends State<ProjectUpdationListing> {
         ),
         cell(Text(u.companyName ?? '-', style: style)),
         cell(Text(u.value?.toStringAsFixed(2) ?? '-', style: style)),
-        cell(_statusPill(u.status)),
+        cell(_statusPill(u)),
         cell(Text(_dateFmt.format(u.requestedDate), style: style)),
         cell(CreatedByWidget(userData: u.createdBy)),
         DataCell(
           Row(
             children: [
-              if (_canEdit)
+              if (_canEdit && !u.isCancelled)
                 IconButton(
                   icon: const Icon(Iconsax.edit),
                   tooltip: 'Edit $_pageTitle',
@@ -1277,8 +1296,14 @@ class _ProjectUpdationListingState extends State<ProjectUpdationListing> {
               if (_canDelete)
                 IconButton(
                   icon: const Icon(Iconsax.trash),
-                  tooltip: 'Delete $_pageTitle',
-                  color: Theme.of(context).colorScheme.error,
+                  tooltip: u.canCancel
+                      ? 'Cancel $_pageTitle'
+                      : (u.isCancelled
+                            ? 'Already cancelled'
+                            : 'Status changed - cannot cancel'),
+                  color: u.canCancel
+                      ? Theme.of(context).colorScheme.error
+                      : Theme.of(context).disabledColor,
                   splashRadius: 20,
                   onPressed: () => _delete(u),
                 ),
@@ -1330,7 +1355,7 @@ class ProjectUpdationHistory extends StatelessWidget {
                   ],
                 ),
                 subtitle: Text(
-                  '${u.status.label} - requested ${fmt.format(u.requestedDate)}'
+                  '${u.statusText} - requested ${fmt.format(u.requestedDate)}'
                   '${u.value == null ? '' : ' - ${u.value!.toStringAsFixed(2)}'}',
                 ),
               ),

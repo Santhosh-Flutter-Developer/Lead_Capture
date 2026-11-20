@@ -451,6 +451,8 @@ class CrmMappers {
       createdBy: ApiMappers.createdBy(m),
       createdAt: Js.dt(m['created_at']),
       updatedAt: Js.dt(m['updated_at']),
+      isCancelled: Js.b(m['is_cancelled']) || Js.s(m['status']).toLowerCase() == 'cancelled',
+      cancelRemarks: Js.s(m['cancel_remarks']),
     );
   }
 

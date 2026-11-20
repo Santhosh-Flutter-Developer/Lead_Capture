@@ -321,7 +321,7 @@ class _ProjectUpdationKanbanState extends State<ProjectUpdationKanban> {
       padding: const EdgeInsets.only(bottom: 8.0),
       child: Draggable<ProjectUpdationModel>(
         data: u,
-        maxSimultaneousDrags: widget.canEdit ? 1 : 0,
+        maxSimultaneousDrags: (widget.canEdit && !u.isCancelled) ? 1 : 0,
         onDragStarted: () => _handleDragStarted(u, status),
         onDragUpdate: _startEdgeScrolling,
         onDragEnd: (details) {

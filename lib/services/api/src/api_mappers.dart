@@ -156,6 +156,9 @@ class ApiMappers {
   static String? photo(dynamic v) {
     final p = Js.opt(v);
     if (p == null) return null;
+    // A bundled asset path (e.g. the default 'assets/images/user.png' saved in
+    // the DB) is not a network image: loading it as a URL gives a 404 on web.
+    if (p.startsWith('assets/')) return null;
     return ApiConfig.resolveFileUrl(p);
   }
 

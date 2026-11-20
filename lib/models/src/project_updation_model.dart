@@ -51,6 +51,10 @@ class ProjectUpdationModel {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  /// Deleting an updation = cancelling it with remarks (server keeps the row).
+  final bool isCancelled;
+  final String cancelRemarks;
+
   ProjectUpdationModel({
     this.uid,
     this.updationNumber,
@@ -74,8 +78,17 @@ class ProjectUpdationModel {
     required this.createdBy,
     DateTime? createdAt,
     DateTime? updatedAt,
+    this.isCancelled = false,
+    this.cancelRemarks = '',
   }) : createdAt = createdAt ?? DateTime.now(),
        updatedAt = updatedAt ?? DateTime.now();
+
+  /// Label to show: Cancelled or the normal status label.
+  String get statusText => isCancelled ? 'Cancelled' : status.label;
+
+  /// Cancel is allowed only while the updation is still in its first
+  /// (Pending) status - once the status was changed it cannot be cancelled.
+  bool get canCancel => !isCancelled && status == UpdationStatus.pending;
 
   /// UPD-0001 style ID.
   String get updationCode => codeFor(updationNumber);
@@ -107,6 +120,8 @@ class ProjectUpdationModel {
     UserDataModel? createdBy,
     DateTime? createdAt,
     DateTime? updatedAt,
+    bool? isCancelled,
+    String? cancelRemarks,
   }) {
     return ProjectUpdationModel(
       uid: uid ?? this.uid,
@@ -131,6 +146,8 @@ class ProjectUpdationModel {
       createdBy: createdBy ?? this.createdBy,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      isCancelled: isCancelled ?? this.isCancelled,
+      cancelRemarks: cancelRemarks ?? this.cancelRemarks,
     );
   }
 

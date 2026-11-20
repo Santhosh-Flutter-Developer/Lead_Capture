@@ -75,6 +75,7 @@ class NotificationsListing extends StatefulWidget {
 }
 
 class _NotificationsListingState extends State<NotificationsListing> {
+  // ignore: unused_element
   Future<void> _runPushDiagnostics() async {
     final ctx = context;
     showDialog(
@@ -796,12 +797,13 @@ class _NotificationsListingState extends State<NotificationsListing> {
               ),
             ),
           )),
-          const SizedBox(width: 8),
-          IconButton(
-            tooltip: 'Test push notification',
-            icon: const Icon(Iconsax.notification),
-            onPressed: _runPushDiagnostics,
-          ),
+          // Push diagnostics button (kept for later troubleshooting):
+          // const SizedBox(width: 8),
+          // IconButton(
+          //   tooltip: 'Test push notification',
+          //   icon: const Icon(Iconsax.notification),
+          //   onPressed: _runPushDiagnostics,
+          // ),
           ]),
           if (presentLabels.isNotEmpty) ...[
             const SizedBox(height: 12),

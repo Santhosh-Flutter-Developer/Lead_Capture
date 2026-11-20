@@ -1,3 +1,4 @@
+import 'package:audioplayers/audioplayers.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 // notification_service.dart
 // CHANGED:
@@ -69,6 +70,22 @@ Future<bool> _isForCurrentUser(Map<String, dynamic> data) async {
     return raw.split(',').map((e) => e.trim()).contains(uid);
   } catch (_) {
     return true; // never lose a notification because of a check failure
+  }
+}
+
+/// In-app notification sound (web foreground toast). Mobile uses the
+/// notification channel sound, Windows plays it in FirestoreNotificationListener.
+final AudioPlayer _inAppPlayer = AudioPlayer();
+DateTime _lastSound = DateTime.fromMillisecondsSinceEpoch(0);
+Future<void> playNotificationSound() async {
+  final now = DateTime.now();
+  if (now.difference(_lastSound).inMilliseconds < 800) return; // burst guard
+  _lastSound = now;
+  try {
+    await _inAppPlayer.stop();
+    await _inAppPlayer.play(AssetSource('audio/notify.mp3'), volume: 1.0);
+  } catch (e) {
+    debugPrint('🔇 [NOTIF] sound failed: $e');
   }
 }
 
@@ -290,6 +307,7 @@ class NotificationService {
     // Show an in-app snackbar/dialog instead.
     final ctx = navigatorKey.currentContext;
     if (ctx == null) return;
+    playNotificationSound();
 
     final title =
         message.notification?.title ?? message.data['title'] ?? 'Notification';
@@ -373,6 +391,16 @@ class NotificationService {
         'High Importance Notifications',
         description: 'Used for important notifications',
         importance: Importance.high,
+        playSound: true,
+        enableVibration: true,
+      );
+      const chatChannel = AndroidNotificationChannel(
+        'chat_channel',
+        'Chat Messages',
+        description: 'All chat messages',
+        importance: Importance.max,
+        playSound: true,
+        enableVibration: true,
       );
 
       await _localNotifications
@@ -380,6 +408,11 @@ class NotificationService {
             AndroidFlutterLocalNotificationsPlugin
           >()
           ?.createNotificationChannel(androidChannel);
+      await _localNotifications
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >()
+          ?.createNotificationChannel(chatChannel);
 
       const initializationSettingsAndroid = AndroidInitializationSettings(
         '@mipmap/ic_launcher',
@@ -554,6 +587,7 @@ class NotificationService {
             'General Notifications',
             importance: Importance.high,
             priority: Priority.high,
+            playSound: true,
             icon: '@mipmap/ic_launcher',
           ),
           iOS: DarwinNotificationDetails(
