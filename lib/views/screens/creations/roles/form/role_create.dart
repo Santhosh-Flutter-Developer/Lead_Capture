@@ -236,6 +236,62 @@ class _RoleCreateState extends State<RoleCreate> {
     );
   }
 
+  // ── Data scope (All Leads / All Deals) ─────────────────────────────────
+  bool _allLeads = false;
+  bool _allDeals = false;
+
+  Widget _scopeCheck(String label, bool value, ValueChanged<bool> onChanged) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () => setState(() => onChanged(!value)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Checkbox(
+              value: value,
+              onChanged: (v) => setState(() => onChanged(v ?? false)),
+              visualDensity: VisualDensity.compact,
+            ),
+            Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Checked -> staff of this role see every lead / deal of the company.
+  /// Unchecked -> only the ones they created or follow up.
+  Widget _buildScopeAccess() {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Data Scope Access',
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          decoration: BoxDecoration(
+            border: Border.all(color: scheme.outlineVariant),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Wrap(
+            spacing: 12,
+            children: [
+              _scopeCheck('All Leads', _allLeads, (v) => _allLeads = v),
+              _scopeCheck('All Deals', _allDeals, (v) => _allDeals = v),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildFormFields(BoxConstraints constraints) {
     final double currentWidth = constraints.maxWidth;
     const double horizontalSpacing = 16.0;
@@ -268,8 +324,9 @@ class _RoleCreateState extends State<RoleCreate> {
                   val == null || val.isEmpty ? 'Role name is required' : null,
             ),
           ),
+          SizedBox(width: itemWidth, child: _buildScopeAccess()),
           SizedBox(
-            width: itemWidth,
+            width: currentWidth,
             child: FormFields(
               label: 'Description',
               controller: _descriptionController,
@@ -311,6 +368,8 @@ class _RoleCreateState extends State<RoleCreate> {
           name: _roleNameController.text.trim(),
           description: _descriptionController.text.trim(),
           permissions: reducedRows,
+          allLeads: _allLeads,
+          allDeals: _allDeals,
           createdBy: await Spdb.getUser(),
         );
 

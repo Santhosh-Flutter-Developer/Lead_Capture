@@ -273,6 +273,8 @@ class ApiMappers {
         name: Js.s(m['name']),
         description: Js.s(m['description']),
         permissions: permissions(m['permissions']),
+        allLeads: Js.b(m['all_leads']),
+        allDeals: Js.b(m['all_deals']),
         createdBy: createdBy(m),
         createdAt: Js.dt(m['created_at']),
         updatedAt: Js.dt(m['updated_at']),

@@ -27,7 +27,11 @@ class CalendarBloc extends Bloc<CalendarCalendar, CalendarState> {
     final currentUser = await Spdb.getUser();
     final isAdmin = currentUser.userType == UserType.admin;
 
-    // Admins see every record; employees only records they created.
+    // Tasks / tickets: admins see every record; employees only their own.
+    // Leads and deals are NOT filtered here: leads.php / deals.php already
+    // scope them (admin or "All Leads"/"All Deals" role -> everything, else
+    // created-by-me or follow-up-me), and a creator-only filter here would
+    // hide follow-up records and the "All" roles' records.
     bool isRecordVisible(UserDataModel createdBy) =>
         isAdmin || createdBy.uid == currentUser.uid;
     // Events: only the creator sees them.
@@ -45,8 +49,8 @@ class CalendarBloc extends Bloc<CalendarCalendar, CalendarState> {
         return [
           (r[0] as List<EventModel>).where((e) => isEventVisible(e.createdBy)).toList(),
           (r[1] as List<TaskModel>).where((t) => isRecordVisible(t.taskCreatedBy)).toList(),
-          (r[2] as List<LeadModel>).where((l) => isRecordVisible(l.createdBy)).toList(),
-          (r[3] as List<DealModel>).where((d) => isRecordVisible(d.createdBy)).toList(),
+          r[2] as List<LeadModel>,
+          r[3] as List<DealModel>,
           (r[4] as List<CustomerTicketModel>).where((t) => isRecordVisible(t.ticketCreatedBy)).toList(),
         ];
       }),

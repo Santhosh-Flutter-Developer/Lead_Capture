@@ -80,6 +80,8 @@ class DashboardService {
         _safe(() => RecentActivityService().getRecentActivities(), <ActivityItem>[]),
         _safe(() => isAdmin ? LeadService.getAllLeads() : Future.value(<LeadModel>[]), <LeadModel>[]),
         _safe(() => isAdmin ? DealService.getAllDeals() : Future.value(<DealModel>[]), <DealModel>[]),
+        // Staff: their own (API-scoped) leads, used for the two personal cards.
+        _safe(() => isAdmin ? Future.value(<LeadModel>[]) : LeadService.getAllLeads(), <LeadModel>[]),
       ]);
 
       final tasks = results[0] as List<TaskModel>;
@@ -89,6 +91,23 @@ class DashboardService {
       final recent = results[4] as List<ActivityItem>;
       final leads = results[5] as List<LeadModel>;
       final deals = results[6] as List<DealModel>;
+      final staffLeads = results[7] as List<LeadModel>;
+
+      // Personal cards for staff, worked out from the leads the API returned
+      // (those are already limited to what this user may see). The server KPI
+      // for these two counts company-wide open leads for everyone.
+      //   Pending Follow-ups = my open leads where I am the follow-up person
+      //   Leads Assigned     = leads I created or follow up
+      final pendingFollowUps = isAdmin
+          ? (Js.i(kpi['pendingFollowUps']) ?? 0)
+          : staffLeads
+                .where((l) => l.followUp == userId && !l.leadsConverted)
+                .length;
+      final leadsAssigned = isAdmin
+          ? (Js.i(kpi['leadsAssigned']) ?? 0)
+          : staffLeads
+                .where((l) => l.followUp == userId || l.createdBy.uid == userId)
+                .length;
 
       final pendingTasks =
           tasks.where((t) => !t.completed && _inRange(t.createdAt, r)).length;
@@ -103,8 +122,8 @@ class DashboardService {
         pendingTasks: pendingTasks,
         activeEmployees: Js.i(kpi['activeEmployees']) ?? 0,
         assignedTasks: Js.i(kpi['assignedTasks']) ?? 0,
-        pendingFollowUps: Js.i(kpi['pendingFollowUps']) ?? 0,
-        leadsAssigned: Js.i(kpi['leadsAssigned']) ?? 0,
+        pendingFollowUps: pendingFollowUps,
+        leadsAssigned: leadsAssigned,
         totalTickets: Js.i(kpi['totalTickets']) ?? 0,
         pendingTickets: Js.i(kpi['pendingTickets']) ?? 0,
         assignedTickets: assignedTickets,

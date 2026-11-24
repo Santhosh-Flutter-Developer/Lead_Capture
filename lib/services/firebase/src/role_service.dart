@@ -38,6 +38,8 @@ class RoleService {
         name: role.name,
         description: role.description,
         permissions: ApiMappers.permissionsBody(role.permissions),
+        allLeads: role.allLeads,
+        allDeals: role.allDeals,
       )).ensureSuccess();
       ApiLookup.invalidate();
       ApiLive.changed('role');
@@ -56,6 +58,8 @@ class RoleService {
         name: role.name,
         description: role.description,
         permissions: ApiMappers.permissionsBody(role.permissions),
+        allLeads: role.allLeads,
+        allDeals: role.allDeals,
       )).ensureSuccess();
       ApiLookup.invalidate();
       ApiLive.changed('role');

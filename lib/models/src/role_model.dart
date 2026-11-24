@@ -12,6 +12,10 @@ class RoleModel {
   final String lowercaseName;
   final String description;
   final List<PermissionModel> permissions;
+  /// Data scope: true -> staff in this role see ALL leads / ALL deals of the
+  /// company; false -> only the ones they created or follow up.
+  final bool allLeads;
+  final bool allDeals;
   final UserDataModel createdBy;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -25,6 +29,8 @@ class RoleModel {
     String? lowercaseName,
     required this.description,
     this.permissions = const [],
+    this.allLeads = false,
+    this.allDeals = false,
     required this.createdBy,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -38,6 +44,8 @@ class RoleModel {
     String? lowercaseName,
     String? description,
     List<PermissionModel>? permissions,
+    bool? allLeads,
+    bool? allDeals,
     UserDataModel? createdBy,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -48,6 +56,8 @@ class RoleModel {
       lowercaseName: lowercaseName ?? this.lowercaseName,
       description: description ?? this.description,
       permissions: permissions ?? this.permissions,
+      allLeads: allLeads ?? this.allLeads,
+      allDeals: allDeals ?? this.allDeals,
       createdBy: createdBy ?? this.createdBy,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -61,6 +71,8 @@ class RoleModel {
       'lowercaseName': lowercaseName.encrypt,
       'description': description.encrypt,
       'permissions': permissions.map((e) => e.toMap()).toList(),
+      'allLeads': allLeads,
+      'allDeals': allDeals,
       'createdBy': createdBy.toMap(),
       'createdAt': createdAt.millisecondsSinceEpoch,
       'updatedAt': updatedAt.millisecondsSinceEpoch,
@@ -74,6 +86,8 @@ class RoleModel {
       'lowercaseName': lowercaseName.encrypt,
       'description': description.encrypt,
       'permissions': permissions.map((e) => e.toMap()).toList(),
+      'allLeads': allLeads,
+      'allDeals': allDeals,
       'createdBy': createdBy.toMap(),
       'updatedAt': updatedAt.millisecondsSinceEpoch,
     };
@@ -115,6 +129,9 @@ class RoleModel {
                 )
                 .toList()
           : [],
+
+      allLeads: map['allLeads'] == true,
+      allDeals: map['allDeals'] == true,
 
       createdBy: map['createdBy'] != null && map['createdBy'] is Map
           ? UserDataModel.fromMap(Map<String, dynamic>.from(map['createdBy']))

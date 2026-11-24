@@ -321,12 +321,10 @@ class LeadService {
       final res = (await LeadsApiService.call('list')).ensureSuccess();
       final leads = res.dataList.map((r) => CrmMappers.lead(Js.m(r))).toList();
       leads.sort((a, b) => a.leadName.compareTo(b.leadName));
-      // Creator AND the follow-up staff can see the lead (matches leads.php).
-      return FollowUpAccess.filterVisible(
-        leads,
-        (l) => l.followUp,
-        createdByOf: (l) => l.createdBy.uid,
-      );
+      // Scope is decided by leads.php: admin / role "All Leads" -> everything,
+      // otherwise only leads the user created or follows up. No second
+      // client-side filter, or "All Leads" roles would be cut down again.
+      return leads;
     } catch (e, st) {
       _fail('Error fetching leads', e, st);
     }

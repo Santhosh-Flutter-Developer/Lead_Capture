@@ -274,12 +274,11 @@ class DealService {
       final res = (await DealsApiService.call('list')).ensureSuccess();
       final deals = res.dataList.map((r) => CrmMappers.deal(Js.m(r))).toList();
       deals.sort((a, b) => a.dealName.compareTo(b.dealName));
-      // Creator AND the follow-up staff can see the deal.
-      return FollowUpAccess.filterVisible(
-        deals,
-        (d) => d.followUp,
-        createdByOf: (d) => d.createdBy.uid,
-      );
+      // Scope is decided by deals.php: admin / role "All Deals" -> everything,
+      // otherwise deals the user created, follows up, or whose lead the user
+      // follows up. No second client-side filter (it hid the lead-follow-up
+      // deals and the "All Deals" roles).
+      return deals;
     } catch (e, st) {
       _fail('Error fetching deals', e, st);
     }
