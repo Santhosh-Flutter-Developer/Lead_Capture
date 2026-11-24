@@ -160,10 +160,10 @@ class MenuService {
         children: [
           MenuItem(
             id: 'lead_category',
-            title: 'Lead Category',
+            title: 'Client Category',
             icon: Iconsax.category,
             route: '/lead-category',
-            requiredPermissions: ['Lead Category'],
+            requiredPermissions: ['Lead Category', 'Client Category'],
           ),
           MenuItem(
             id: 'lead_source',

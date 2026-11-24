@@ -152,7 +152,8 @@ class _DesktopMainScreenState extends State<DesktopMainScreen> {
         return const SubDepartmentListing();
       case 'Employees':
         return const EmployeeListing();
-      case 'Lead Category':
+      case 'Client Category':
+      case 'Lead Category': // old title, kept for saved/recent entries
         return const LeadCategoryListing();
       case 'Lead Status':
         return const LeadStatusListing();

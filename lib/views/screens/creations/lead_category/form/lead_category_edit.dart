@@ -76,7 +76,7 @@ final ScrollController _vScrollController = ScrollController();
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  "Update Lead Category",
+                  "Update Client Category",
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                     color: AppColors.white,
                     fontWeight: FontWeight.bold,
@@ -214,7 +214,7 @@ final ScrollController _vScrollController = ScrollController();
                               icon: Iconsax.category,
                               title: "Category Information",
                               subtitle:
-                                  "Give this lead category a name and description",
+                                  "Give this client category a name and description",
                               child: LayoutBuilder(
                                 builder: (context, constraints) =>
                                     _buildFormFields(constraints),

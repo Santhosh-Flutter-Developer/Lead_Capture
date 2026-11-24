@@ -9,7 +9,7 @@ import '/theme/theme.dart';
 import '/services/services.dart';
 import 'bloc/lead_category_bloc.dart';
 
-const String _pageTitle = "Lead Category";
+const String _pageTitle = "Client Category";
 const double _wideBreakpoint = 900;
 
 class LeadCategoryListing extends StatelessWidget {
@@ -160,7 +160,7 @@ class _LeadCategoryListingViewState extends State<LeadCategoryListingView> {
                       controllerWatch.paginatedItems.isEmpty
                           ? NoData(
                               text: state.leadCategory.isEmpty
-                                  ? "No lead categories available"
+                                  ? "No client categories available"
                                   : "No matching records found",
                             )
                           : _buildTableCard(
@@ -231,7 +231,7 @@ class _LeadCategoryListingViewState extends State<LeadCategoryListingView> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  "Lead Category Management",
+                  "Client Category Management",
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     color: AppColors.white,
                     fontWeight: FontWeight.bold,
@@ -869,7 +869,7 @@ class _LeadCategoryListingViewState extends State<LeadCategoryListingView> {
 }
 
 // ---------------------------------------------------------------------
-// A more polished, colorful search field for the Lead Category toolbar.
+// A more polished, colorful search field for the Client Category toolbar.
 // ---------------------------------------------------------------------
 class _LeadCategorySearchField extends StatefulWidget {
   final String pageTitle;

@@ -48,14 +48,17 @@ class _MasterClientListingState extends State<MasterClientListing> {
   String? _fState;
   String? _fDistrict;
   String? _fCity;
+  String? _fCategory; // Client Category (name)
   // Bumped by "Clear filters" so the dropdowns rebuild with no selection.
   int _filterEpoch = 0;
   List<String> _countryOpts = [];
   List<String> _stateOpts = [];
   List<String> _districtOpts = [];
   List<String> _cityOpts = [];
+  List<String> _categoryOpts = [];
 
   bool get _hasLocationFilter =>
+      _fCategory != null ||
       _fCountry != null ||
       _fState != null ||
       _fDistrict != null ||
@@ -75,7 +78,8 @@ class _MasterClientListingState extends State<MasterClientListing> {
     _controller = PaginatedDataController<ClientModel>(
       initialSortColumnIndex: 0,
       filterLogic: (c, query) {
-        if (!_same(c.country?.name, _fCountry) ||
+        if (!_same(c.clientCategoryName, _fCategory) ||
+            !_same(c.country?.name, _fCountry) ||
             !_same(c.state?.name, _fState) ||
             !_same(c.district?.name, _fDistrict) ||
             !_same(c.city?.name, _fCity)) {
@@ -87,6 +91,7 @@ class _MasterClientListingState extends State<MasterClientListing> {
             (c.clientName ?? '').toLowerCase().contains(q) ||
             (c.mobileNumber ?? '').toLowerCase().contains(q) ||
             (c.gstVatNumber ?? '').toLowerCase().contains(q) ||
+            (c.clientCategoryName ?? '').toLowerCase().contains(q) ||
             (c.companyAddress ?? '').toLowerCase().contains(q) ||
             (c.postalCode ?? '').toLowerCase().contains(q) ||
             (c.country?.name ?? '').toLowerCase().contains(q) ||
@@ -108,30 +113,33 @@ class _MasterClientListingState extends State<MasterClientListing> {
             );
             break;
           case 3:
-            compare = _cmp(a.companyAddress, b.companyAddress);
+            compare = _cmp(a.clientCategoryName, b.clientCategoryName);
             break;
           case 4:
-            compare = _cmp(a.country?.name, b.country?.name);
+            compare = _cmp(a.companyAddress, b.companyAddress);
             break;
           case 5:
-            compare = _cmp(a.state?.name, b.state?.name);
+            compare = _cmp(a.country?.name, b.country?.name);
             break;
           case 6:
-            compare = _cmp(a.district?.name, b.district?.name);
+            compare = _cmp(a.state?.name, b.state?.name);
             break;
           case 7:
-            compare = _cmp(a.city?.name, b.city?.name);
+            compare = _cmp(a.district?.name, b.district?.name);
             break;
           case 8:
-            compare = _cmp(a.postalCode, b.postalCode);
+            compare = _cmp(a.city?.name, b.city?.name);
             break;
           case 9:
-            compare = _statsOf(a).leads.compareTo(_statsOf(b).leads);
+            compare = _cmp(a.postalCode, b.postalCode);
             break;
           case 10:
-            compare = _statsOf(a).deals.compareTo(_statsOf(b).deals);
+            compare = _statsOf(a).leads.compareTo(_statsOf(b).leads);
             break;
           case 11:
+            compare = _statsOf(a).deals.compareTo(_statsOf(b).deals);
+            break;
+          case 12:
             compare = _statsOf(a).value.compareTo(_statsOf(b).value);
             break;
           default:
@@ -150,6 +158,16 @@ class _MasterClientListingState extends State<MasterClientListing> {
   Future<void> _loadCountryOptions() async {
     final countries = await RegionDataService.getCountries();
     _countryOpts = countries.map((e) => e.name).toList();
+  }
+
+  /// Client Category options for the filter (client_category master).
+  Future<void> _loadCategoryOptions() async {
+    try {
+      final cats = await LeadCategoryService.getAllLeadCategories();
+      _categoryOpts = cats.map((e) => e.name).toList();
+    } catch (e, st) {
+      await ErrorService.recordError(e, st);
+    }
   }
 
   Future<void> _loadStateOptions() async {
@@ -210,12 +228,18 @@ class _MasterClientListingState extends State<MasterClientListing> {
     setState(_applyFilters);
   }
 
+  void _onCategoryFilter(String? v) {
+    _fCategory = v;
+    setState(_applyFilters);
+  }
+
   void _onCityFilter(String? v) {
     _fCity = v;
     setState(_applyFilters);
   }
 
   void _clearFilters() {
+    _fCategory = null;
     _fCountry = _fState = _fDistrict = _fCity = null;
     _stateOpts = [];
     _districtOpts = [];
@@ -252,6 +276,7 @@ class _MasterClientListingState extends State<MasterClientListing> {
       _all = clients;
       _stats = stats;
       if (_countryOpts.isEmpty) await _loadCountryOptions();
+      await _loadCategoryOptions();
       _controller.setData(clients);
       setState(() {
         _loading = false;
@@ -561,6 +586,15 @@ class _MasterClientListingState extends State<MasterClientListing> {
     final fields = <Widget>[
       slot(
         FormDropdownSearch(
+          key: ValueKey('f_category_${_filterEpoch}_${_categoryOpts.length}'),
+          label: 'Client Category',
+          initialItem: _fCategory,
+          items: _categoryOpts,
+          onChanged: (v) => _onCategoryFilter(v as String?),
+        ),
+      ),
+      slot(
+        FormDropdownSearch(
           key: ValueKey('f_country_${_filterEpoch}_${_countryOpts.length}'),
           label: 'Country',
           initialItem: _fCountry,
@@ -679,6 +713,10 @@ class _MasterClientListingState extends State<MasterClientListing> {
                         ),
                         const DataColumn(label: Text('Mobile')),
                         DataColumn(
+                          label: const Text('Client Category'),
+                          onSort: controller.setSort,
+                        ),
+                        DataColumn(
                           label: const Text('Address'),
                           onSort: controller.setSort,
                         ),
@@ -762,6 +800,7 @@ class _MasterClientListingState extends State<MasterClientListing> {
         ),
         DataCell(Text(c.clientName?.isNotEmpty == true ? c.clientName! : '-', style: style)),
         DataCell(Text(c.mobileNumber?.isNotEmpty == true ? c.mobileNumber! : '-', style: style)),
+        DataCell(Text(_dash(c.clientCategoryName), style: style)),
         DataCell(
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 240),
@@ -820,6 +859,7 @@ class _MasterClientListingState extends State<MasterClientListing> {
           'Company',
           'Contact Name',
           'Contact Mobile',
+          'Client Category',
           'Office Phone',
           'GST/VAT',
           'Country',
@@ -838,6 +878,7 @@ class _MasterClientListingState extends State<MasterClientListing> {
             c.companyName ?? '',
             c.clientName ?? '',
             c.mobileNumber ?? '',
+            c.clientCategoryName ?? '',
             c.officePhoneNo ?? '',
             c.gstVatNumber ?? '',
             c.country?.name ?? '',

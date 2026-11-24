@@ -10,6 +10,16 @@ class PermissionService {
   static const _exportKey = 'perm_export';
   static const _importKey = 'perm_import';
 
+  /// Roles store this module's permission under 'Lead Category' (older
+  /// roles) or 'Client Category' (new name). Treat both as the same page so
+  /// a role that grants one is honoured wherever the other is asked for.
+  /// The exact name asked for is always tried first.
+  static List<String> _pageNames(String page) {
+    const group = ['Client Category', 'Lead Category'];
+    if (!group.contains(page)) return [page];
+    return [page, ...group.where((e) => e != page)];
+  }
+
   /// Save Permissions
   static Future<void> savePermissions(List<PermissionModel> permissions) async {
     final prefs = await SharedPreferences.getInstance();
@@ -54,7 +64,11 @@ class PermissionService {
         // (and anything else still reading the cache) stays fresh too.
         await savePermissions(role.permissions);
 
-        final match = role.permissions.where((p) => p.page == page);
+        Iterable<PermissionModel> match = const [];
+        for (final name in _pageNames(page)) {
+          match = role.permissions.where((p) => p.page == name);
+          if (match.isNotEmpty) break;
+        }
         if (match.isEmpty) return null;
 
         // Return the role's permission entry for this page exactly as
@@ -80,6 +94,12 @@ class PermissionService {
     // nothing cached for it — return null so callers can apply their own
     // fallback. Once it *has* been synced, trust the cached flags as-is,
     // even if every one of them is false (an explicit "no access").
+    for (final name in _pageNames(page)) {
+      if (prefs.containsKey('${_viewKey}_$name')) {
+        page = name;
+        break;
+      }
+    }
     if (!prefs.containsKey('${_viewKey}_$page')) {
       return null;
     }

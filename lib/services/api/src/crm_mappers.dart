@@ -226,6 +226,8 @@ class CrmMappers {
         notes: Js.opt(m['notes']),
         isActive: true,
         isCompany: true,
+        clientCategoryId: Js.opt(m['client_category_id']),
+        clientCategoryName: Js.opt(m['category_name']),
         createdBy: ApiMappers.createdBy(m),
         createdAt: Js.dt(m['created_at']),
         updatedAt: Js.dt(m['updated_at']),

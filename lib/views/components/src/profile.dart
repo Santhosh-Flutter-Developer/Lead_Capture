@@ -109,6 +109,72 @@ class _ProfileState extends State<Profile> {
     }
   }
 
+  // ── Password (inline edit, like Residential Address) ───────────────────
+  final TextEditingController _passwordController = TextEditingController();
+  bool _passwordVisible = false;
+  bool _savingPassword = false;
+
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    for (final c in controllers.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  void _startPasswordEdit() {
+    setState(() {
+      _passwordController.clear();
+      _passwordVisible = false;
+      editingField = 'password';
+    });
+  }
+
+  void _cancelPasswordEdit() {
+    if (_savingPassword) return;
+    setState(() {
+      _passwordController.clear();
+      editingField = null;
+    });
+  }
+
+  /// Saves the new password, then ends the session so the user logs in again.
+  Future<void> _savePassword() async {
+    if (_savingPassword) return;
+    final newPassword = _passwordController.text;
+    if (newPassword.isEmpty) {
+      FlushBar.show(context, 'Password is required', isSuccess: false);
+      return;
+    }
+    if (newPassword.length < 8) {
+      FlushBar.show(
+        context,
+        'Password must be at least 8 characters',
+        isSuccess: false,
+      );
+      return;
+    }
+
+    setState(() => _savingPassword = true);
+    try {
+      await AuthService.setPassword(newPassword: newPassword);
+      if (!mounted) return;
+      FlushBar.show(
+        context,
+        'Password changed successfully. Please login again.',
+      );
+      // Short pause so the message is readable, then end the session (FCM
+      // token cleanup, session clear) and go back to the login screen.
+      await Future.delayed(const Duration(milliseconds: 1500));
+      await forceLogout();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _savingPassword = false);
+      FlushBar.show(context, e.toString(), isSuccess: false);
+    }
+  }
+
   Future<void> _changeProfileImage() async {
     XFile? imageFile;
 
@@ -766,6 +832,7 @@ class _ProfileState extends State<Profile> {
                 : "Muted",
             editable: false,
           ),
+          _buildPasswordPoint(),
         ], crossAxisCount),
       ],
     );
@@ -827,6 +894,106 @@ class _ProfileState extends State<Profile> {
           ),
         );
       },
+    );
+  }
+
+  /// "Password" row: masked value; the edit icon turns it into an input
+  /// (same look as Residential Address) with a tick to save.
+  Widget _buildPasswordPoint() {
+    final bool isEditing = editingField == 'password';
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'PASSWORD',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: scheme.onSurfaceVariant,
+                    letterSpacing: 1,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                if (isEditing)
+                  TextField(
+                    controller: _passwordController,
+                    autofocus: true,
+                    obscureText: !_passwordVisible,
+                    onSubmitted: (_) => _savePassword(),
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      border: const UnderlineInputBorder(),
+                      hintText: 'Enter new password (min 8 characters)',
+                      suffixIcon: IconButton(
+                        iconSize: 18,
+                        icon: Icon(
+                          _passwordVisible
+                              ? Iconsax.eye
+                              : Iconsax.eye_slash,
+                        ),
+                        onPressed: () => setState(
+                          () => _passwordVisible = !_passwordVisible,
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  Text(
+                    '••••••••',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 2,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (isEditing) ...[
+            IconButton(
+              tooltip: 'Cancel',
+              onPressed: _savingPassword ? null : _cancelPasswordEdit,
+              icon: Icon(
+                Iconsax.close_circle,
+                size: 18,
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+            IconButton(
+              tooltip: 'Update Password',
+              onPressed: _savingPassword ? null : _savePassword,
+              icon: _savingPassword
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(
+                      Iconsax.tick_circle,
+                      size: 18,
+                      color: scheme.primary,
+                    ),
+            ),
+          ] else
+            IconButton(
+              tooltip: 'Change Password',
+              onPressed: _startPasswordEdit,
+              icon: Icon(Iconsax.edit, size: 18, color: scheme.primary),
+            ),
+        ],
+      ),
     );
   }
 

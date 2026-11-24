@@ -5,24 +5,35 @@ import '/services/services.dart';
 ///
 /// A record may be assigned to ONE employee ("Follow Up"). Visibility rule:
 ///   • no follow-up set      -> visible exactly as before (nothing changes)
-///   • follow-up set         -> visible ONLY to that employee and to admins
+///   • follow-up set         -> visible to that employee, to admins and, when
+///                              [createdByOf] is given, to the record's creator
 class FollowUpAccess {
   FollowUpAccess._();
 
   /// Keeps only the records the logged-in user is allowed to see.
   static Future<List<T>> filterVisible<T>(
     List<T> items,
-    String? Function(T item) followUpOf,
-  ) async {
+    String? Function(T item) followUpOf, {
+    String? Function(T item)? createdByOf,
+  }) async {
     if (await Spdb.isAdminLoggedIn()) return items;
     final uid = (await Spdb.getUid())?.trim() ?? '';
-    return items.where((e) => _allowed(followUpOf(e), uid)).toList();
+    return items
+        .where(
+          (e) =>
+              _allowed(followUpOf(e), uid) ||
+              (createdByOf != null &&
+                  uid.isNotEmpty &&
+                  (createdByOf(e)?.trim() ?? '') == uid),
+        )
+        .toList();
   }
 
   /// Same rule for a single record (e.g. a direct link / notification).
-  static Future<bool> canView(String? followUp) async {
+  static Future<bool> canView(String? followUp, {String? createdBy}) async {
     if (await Spdb.isAdminLoggedIn()) return true;
     final uid = (await Spdb.getUid())?.trim() ?? '';
+    if (uid.isNotEmpty && (createdBy?.trim() ?? '') == uid) return true;
     return _allowed(followUp, uid);
   }
 

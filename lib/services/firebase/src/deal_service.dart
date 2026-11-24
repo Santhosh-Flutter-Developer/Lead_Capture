@@ -274,7 +274,12 @@ class DealService {
       final res = (await DealsApiService.call('list')).ensureSuccess();
       final deals = res.dataList.map((r) => CrmMappers.deal(Js.m(r))).toList();
       deals.sort((a, b) => a.dealName.compareTo(b.dealName));
-      return FollowUpAccess.filterVisible(deals, (d) => d.followUp);
+      // Creator AND the follow-up staff can see the deal.
+      return FollowUpAccess.filterVisible(
+        deals,
+        (d) => d.followUp,
+        createdByOf: (d) => d.createdBy.uid,
+      );
     } catch (e, st) {
       _fail('Error fetching deals', e, st);
     }

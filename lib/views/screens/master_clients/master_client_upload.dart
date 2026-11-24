@@ -5,9 +5,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:iconsax/iconsax.dart';
 import 'package:leadcapture/models/src/client_model.dart';
+import 'package:leadcapture/models/src/lead_category_model.dart';
 import 'package:leadcapture/models/src/region_model.dart';
 import 'package:leadcapture/services/database/src/spdb.dart';
 import 'package:leadcapture/services/firebase/src/client_service.dart';
+import 'package:leadcapture/services/firebase/src/lead_category_service.dart';
 import 'package:leadcapture/services/others/src/region_data_service.dart';
 import 'package:leadcapture/utils/src/download.dart';
 import 'package:leadcapture/views/components/src/xlsx_csv_reader.dart';
@@ -18,9 +20,10 @@ import 'package:leadcapture/views/ui/src/loading.dart';
 ///
 /// Columns (same order as the downloadable template):
 ///   0 Company Name *   1 Contact Name *   2 Contact Mobile * (10 digits)
-///   3 Office Phone     4 GST/VAT          5 Country   6 State
-///   7 District         8 City             9 Postal Code (6 digits)
-///   10 Company Address
+///   3 Client Category * (existing name is reused, a new name is created)
+///   4 Office Phone     5 GST/VAT          6 Country   7 State
+///   8 District         9 City             10 Postal Code (6 digits)
+///   11 Company Address
 class MasterClientUpload extends StatefulWidget {
   const MasterClientUpload({super.key});
 
@@ -143,7 +146,11 @@ class _MasterClientUploadState extends State<MasterClientUpload> {
       } else if (!RegExp(r'^\d{10}$').hasMatch(mobile)) {
         errors.add('Row $n: Contact Mobile must be exactly 10 digits');
       }
-      final postal = _cell(row, 9);
+      final categoryText = _cell(row, 3);
+      if (categoryText.isEmpty) {
+        errors.add('Row $n: Client Category is required');
+      }
+      final postal = _cell(row, 10);
       if (postal.isNotEmpty && !RegExp(r'^\d{6}$').hasMatch(postal)) {
         errors.add('Row $n: Postal Code must be 6 digits');
       }
@@ -189,6 +196,7 @@ class _MasterClientUploadState extends State<MasterClientUpload> {
           if (c.isCompany) ...ClientService.duplicateKeysForClient(c),
       };
 
+      final categoryCache = <String, LeadCategoryModel>{};
       final stateCache = <String, List<StateModel>>{};
       final districtCache = <String, List<DistrictModel>>{};
       final cityCache = <String, List<CityModel>>{};
@@ -197,10 +205,10 @@ class _MasterClientUploadState extends State<MasterClientUpload> {
         final row = _rows[i];
         final n = i + 1;
         try {
-          final countryText = _cell(row, 5);
-          final stateText = _cell(row, 6);
-          final districtText = _cell(row, 7);
-          final cityText = _cell(row, 8);
+          final countryText = _cell(row, 6);
+          final stateText = _cell(row, 7);
+          final districtText = _cell(row, 8);
+          final cityText = _cell(row, 9);
 
           RegionModel? country;
           StateModel? state;
@@ -291,14 +299,14 @@ class _MasterClientUploadState extends State<MasterClientUpload> {
             companyName: _cell(row, 0),
             clientName: _cell(row, 1),
             mobileNumber: _cell(row, 2),
-            officePhoneNo: _cell(row, 3),
-            gstVatNumber: _cell(row, 4),
+            officePhoneNo: _cell(row, 4),
+            gstVatNumber: _cell(row, 5),
             country: country,
             state: state,
             district: district,
             city: city,
-            postalCode: _cell(row, 9),
-            companyAddress: _cell(row, 10),
+            postalCode: _cell(row, 10),
+            companyAddress: _cell(row, 11),
             loginAllowed: false,
             receiveEmailNotifications: false,
             createdBy: user,
@@ -311,8 +319,18 @@ class _MasterClientUploadState extends State<MasterClientUpload> {
             continue;
           }
 
+          // Client Category: reuse the existing one (case-insensitive), or
+          // create it once when the name is new. Only done for rows that
+          // will really be imported, so skipped duplicates create nothing.
+          final categoryName = _cell(row, 3);
+          final category = categoryCache[categoryName.toLowerCase()] ??=
+              await LeadCategoryService.getByNameOrCreate(name: categoryName);
+
           await ClientService.createClient(
-            client: model,
+            client: model.copyWith(
+              clientCategoryId: category.uid,
+              clientCategoryName: category.name,
+            ),
             skipDuplicateCheck: true,
           );
           keys.addAll(newKeys);
@@ -459,7 +477,7 @@ class _MasterClientUploadState extends State<MasterClientUpload> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Required columns: Company Name, Contact Name and Contact Mobile (10 digits). '
+                        'Required columns: Company Name, Contact Name, Contact Mobile (10 digits) and Client Category. '
                         'Country, State, District, City, Postal Code, GST/VAT, Office Phone and Address are optional '
                         '(location names must match the app\'s list). '
                         'A company that already exists (same name or GST/VAT) is skipped.',

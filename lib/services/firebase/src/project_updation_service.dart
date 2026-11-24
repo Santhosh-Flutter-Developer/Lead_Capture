@@ -89,7 +89,12 @@ class ProjectUpdationService {
       })).ensureSuccess();
       final list = res.dataList.map((r) => CrmMappers.updation(Js.m(r))).toList();
       list.sort((a, b) => (b.updationNumber ?? 0).compareTo(a.updationNumber ?? 0));
-      return FollowUpAccess.filterVisible(list, (u) => u.followUp);
+      // Creator AND the follow-up staff can see the updation.
+      return FollowUpAccess.filterVisible(
+        list,
+        (u) => u.followUp,
+        createdByOf: (u) => u.createdBy.uid,
+      );
     } catch (e, st) {
       _fail(e, st);
     }

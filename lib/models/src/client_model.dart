@@ -29,6 +29,9 @@ class ClientModel {
   final String? companyLogoUrl;
   final bool isActive;
   final bool isCompany;
+  /// Lead Category (client_category uid / name) assigned to this Master Client.
+  final String? clientCategoryId;
+  final String? clientCategoryName;
   final DateTime createdAt;
   final DateTime updatedAt;
   /// Company name, falling back to the contact name for legacy records.
@@ -66,6 +69,8 @@ class ClientModel {
     this.companyLogoUrl,
     this.isActive = true,
     required this.isCompany,
+    this.clientCategoryId,
+    this.clientCategoryName,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) : createdAt = createdAt ?? DateTime.now(),
@@ -99,8 +104,12 @@ class ClientModel {
     String? companyLogoUrl,
     bool? isActive,
     bool? isCompany,
+    String? clientCategoryId,
+    String? clientCategoryName,
     DateTime? createdAt,
     DateTime? updatedAt,
+    // When true, the Lead Category is taken exactly as passed (including null).
+    bool clearCategory = false,
     // When true, country/state/district/city are taken exactly as passed
     // (including null) so a cleared dropdown actually clears the value.
     bool clearLocation = false,
@@ -134,6 +143,12 @@ class ClientModel {
       companyLogoUrl: companyLogoUrl ?? this.companyLogoUrl,
       isActive: isActive ?? this.isActive,
       isCompany: isCompany ?? this.isCompany,
+      clientCategoryId: clearCategory
+          ? clientCategoryId
+          : (clientCategoryId ?? this.clientCategoryId),
+      clientCategoryName: clearCategory
+          ? clientCategoryName
+          : (clientCategoryName ?? this.clientCategoryName),
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -168,6 +183,8 @@ class ClientModel {
       'companyLogoUrl': companyLogoUrl,
       'isActive': isActive,
       'isCompany': isCompany,
+      'clientCategoryId': clientCategoryId,
+      'clientCategoryName': clientCategoryName,
       'createdAt': createdAt.millisecondsSinceEpoch,
       'updatedAt': updatedAt.millisecondsSinceEpoch,
     };
@@ -202,6 +219,8 @@ class ClientModel {
       'companyLogoUrl': companyLogoUrl,
       'isActive': isActive,
       'isCompany': isCompany,
+      'clientCategoryId': clientCategoryId,
+      'clientCategoryName': clientCategoryName,
       'updatedAt': updatedAt.millisecondsSinceEpoch,
     };
   }
@@ -288,6 +307,12 @@ class ClientModel {
           : null,
       isActive: map['isActive'] is bool ? map['isActive'] as bool : false,
       isCompany: map['isCompany'] is bool ? map['isCompany'] as bool : false,
+      clientCategoryId: map['clientCategoryId'] is String
+          ? map['clientCategoryId'] as String
+          : null,
+      clientCategoryName: map['clientCategoryName'] is String
+          ? map['clientCategoryName'] as String
+          : null,
       createdAt: map['createdAt'] is int
           ? DateTime.fromMillisecondsSinceEpoch(map['createdAt'] as int)
           : DateTime.now(),

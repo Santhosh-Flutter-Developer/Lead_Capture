@@ -23,6 +23,22 @@ class ChatService {
   static final Map<String, List<MessagesModel>> _lastMessages = {};
   static final Map<String, Uint8List> _pendingBytes = {};
 
+  // Name / photo of the other person of each direct chat, straight from the
+  // threads API. The chat list normally resolves these from the local user
+  // cache; when that cache is empty or not synced yet (e.g. "Not synced yet"
+  // on a fresh Windows/web session) the list showed blank names and avatars.
+  static final Map<String, String> _peerNames = {};
+  static final Map<String, String> _peerAvatars = {};
+  static String? peerName(String uid) {
+    final n = _peerNames[uid];
+    return (n == null || n.isEmpty) ? null : n;
+  }
+
+  static String? peerAvatar(String uid) {
+    final a = _peerAvatars[uid];
+    return (a == null || a.isEmpty) ? null : a;
+  }
+
   static Never _unsupported(String what) =>
       throw '$what is not supported by the server API.';
   static String _msg(Object e) => e is ApiException ? e.message : e.toString();
@@ -53,6 +69,13 @@ class ChatService {
       final id = Js.s(r['chat_uid']);
       final n = Js.i(r['unread_count']) ?? 0;
       if (n > 0) unread[id] = n;
+      if (!Js.b(r['is_group']) && !Js.b(r['is_self'])) {
+        final other = Js.s(r['other_uid']);
+        if (other.isNotEmpty) {
+          _peerNames[other] = Js.s(r['name']);
+          _peerAvatars[other] = Js.s(r['avatar']);
+        }
+      }
       return ChatMappers.thread(r, myUid: myUid, members: _groupMembers[id]);
     }).toList();
 
@@ -93,6 +116,8 @@ class ChatService {
     _lastChats = [];
     _groupMembers.clear();
     _lastMessages.clear();
+    _peerNames.clear();
+    _peerAvatars.clear();
     _publishUnviewed(<String, int>{});
   }
 

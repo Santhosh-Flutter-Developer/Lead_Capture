@@ -32,7 +32,9 @@ class MasterTypes {
   static const leadSource = 'lead_source';
   static const leadStatus = 'lead_status';
   static const leadPriority = 'lead_priority';
-  static const leadCategory = 'lead_category';
+  // masters.php no longer serves 'lead_category'; the "Lead Category" master
+  // is now stored as 'client_category' and is assigned to Master Clients.
+  static const leadCategory = 'client_category';
   static const dealStatus = 'deal_status';
   static const taskStatus = 'task_status';
   static const ticketStatus = 'ticket_status';

@@ -43,8 +43,6 @@ class _LeadFormState extends State<LeadForm> {
   ClientModel? _client;
   List<LeadSourceModel> _sources = [];
   LeadSourceModel? _source;
-  List<LeadCategoryModel> _categories = [];
-  LeadCategoryModel? _category;
   List<LeadPriorityModel> _priorities = [];
   LeadPriorityModel? _priority;
   List<LeadStatusModel> _statuses = [];
@@ -89,15 +87,11 @@ class _LeadFormState extends State<LeadForm> {
   Future<void> _reload({
     bool clients = false,
     bool sources = false,
-    bool categories = false,
     bool priorities = false,
     bool statuses = false,
   }) async {
     if (clients) _clients = await ClientService.getMasterClients();
     if (sources) _sources = await LeadSourceService.getAllLeadSource();
-    if (categories) {
-      _categories = await LeadCategoryService.getAllLeadCategories();
-    }
     if (priorities) {
       _priorities = await LeadPriorityService.getAllLeadPriority();
     }
@@ -109,7 +103,6 @@ class _LeadFormState extends State<LeadForm> {
       await _reload(
         clients: true,
         sources: true,
-        categories: true,
         priorities: true,
         statuses: true,
       );
@@ -147,10 +140,6 @@ class _LeadFormState extends State<LeadForm> {
           _contactMobile.text = lead.clientMobile ?? '';
         }
 
-        _category = _categories.cast<LeadCategoryModel?>().firstWhere(
-          (c) => c?.uid == lead.leadCategory || c?.name == lead.leadCategory,
-          orElse: () => null,
-        );
         _priority = _priorities.cast<LeadPriorityModel?>().firstWhere(
           (p) => p?.uid == lead.leadPriority || p?.name == lead.leadPriority,
           orElse: () => null,
@@ -392,31 +381,6 @@ class _LeadFormState extends State<LeadForm> {
         box(
           _withPlus(
             dropdown: FormDropdownSearch(
-              key: ValueKey('category_${_categories.length}_${_category?.uid}'),
-              label: 'Lead Category',
-              isRequired: true,
-              initialItem: _category?.name,
-              items: _categories.map((e) => e.name).toList(),
-              onChanged: (v) => _category = _categories
-                  .cast<LeadCategoryModel?>()
-                  .firstWhere((c) => c?.name == v, orElse: () => null),
-              validator: (v) => v == null ? '* Required' : null,
-            ),
-            onAdd: () async {
-              dynamic val;
-              if (kIsMobile) {
-                val = await Sheet.showSheet(context, widget: const LeadCategoryCreate());
-              } else {
-                val = await GeneralDialog.showRTLSheet(context, const LeadCategoryCreate());
-              }
-              return val;
-            },
-            onAdded: (_) => _reload(categories: true),
-          ),
-        ),
-        box(
-          _withPlus(
-            dropdown: FormDropdownSearch(
               key: ValueKey('priority_${_priorities.length}_${_priority?.uid}'),
               label: 'Lead Priority',
               isRequired: true,
@@ -636,7 +600,6 @@ class _LeadFormState extends State<LeadForm> {
           leadName: fields.leadName,
           leadEmail: fields.leadEmail,
           leadSource: _source!,
-          leadCategory: _category?.uid ?? '',
           leadPriority: _priority?.uid ?? '',
           leadValue: fields.value,
           leadStatus: _status?.uid ?? '',
@@ -661,7 +624,7 @@ class _LeadFormState extends State<LeadForm> {
           leadName: fields.leadName,
           leadEmail: fields.leadEmail,
           leadSource: _source!,
-          leadCategory: _category?.uid ?? '',
+          leadCategory: '',
           leadPriority: _priority?.uid ?? '',
           leadValue: fields.value,
           leadStatus: _status?.uid ?? '',

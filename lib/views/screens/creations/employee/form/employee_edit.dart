@@ -1662,10 +1662,17 @@ _scrollController.dispose();
 
           await AdminService.updateAdmin(id: widget.uid, data: adminModel);
 
+          // Own password changed -> end the session, log in again.
+          final ownPasswordChanged = await _isOwnPasswordChange();
+
           if (Navigator.canPop(context)) {
             Navigator.pop(context);
           }
           Navigator.pop(context, true);
+          if (ownPasswordChanged) {
+            await _relogin();
+            return;
+          }
           FlushBar.show(context, "Admin updated successfully", isSuccess: true);
         } else {
           futureLoading(context);
@@ -1739,10 +1746,18 @@ _scrollController.dispose();
             employee: employeeModel,
           );
 
+          // Own password changed -> end the session, log in again.
+          final ownPasswordChanged = await _isOwnPasswordChange();
+
           if (Navigator.canPop(context)) {
             Navigator.pop(context);
           }
           Navigator.pop(context, true);
+
+          if (ownPasswordChanged) {
+            await _relogin();
+            return;
+          }
 
           FlushBar.show(
             context,
@@ -1765,5 +1780,23 @@ _scrollController.dispose();
         );
       }
     }
+  }
+
+  /// True when the logged-in user typed a new password for THEIR OWN record.
+  Future<bool> _isOwnPasswordChange() async {
+    if (_passwordController.text.trim().isEmpty) return false;
+    final myUid = await Spdb.getUid();
+    return myUid != null && myUid == widget.uid;
+  }
+
+  /// Message, short pause, then logout -> login screen.
+  Future<void> _relogin() async {
+    FlushBar.show(
+      context,
+      'Password changed successfully. Please login again.',
+      isSuccess: true,
+    );
+    await Future.delayed(const Duration(milliseconds: 1500));
+    await forceLogout();
   }
 }

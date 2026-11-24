@@ -106,7 +106,7 @@ class LeadCategoryService {
       for (final r in await _rows()) {
         if (excludeUid != null && Js.s(r['uid']) == excludeUid) continue;
         if (Js.s(r['name']).trim().toLowerCase() == name.trim().toLowerCase()) {
-          return 'Lead category name already exists';
+          return 'Client category name already exists';
         }
       }
       return null;

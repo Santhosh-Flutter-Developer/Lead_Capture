@@ -62,7 +62,7 @@ class _LeadCategoryCreateState extends State<LeadCategoryCreate> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  "Create Lead Category",
+                  "Create Client Category",
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                     color: AppColors.white,
                     fontWeight: FontWeight.bold,
@@ -70,7 +70,7 @@ class _LeadCategoryCreateState extends State<LeadCategoryCreate> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  "Add a new category to classify your leads",
+                  "Add a new category to classify your clients",
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: AppColors.white.withValues(alpha: 0.85),
                   ),
@@ -183,7 +183,7 @@ class _LeadCategoryCreateState extends State<LeadCategoryCreate> {
                       child: _buildSectionCard(
                         icon: Iconsax.category,
                         title: "Category Information",
-                        subtitle: "Give this lead category a name and description",
+                        subtitle: "Give this client category a name and description",
                         child: LayoutBuilder(
                           builder: (context, constraints) =>
                               _buildFormFields(constraints),

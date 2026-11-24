@@ -49,6 +49,8 @@ class ClientService {
     'office_phone_no': m.officePhoneNo ?? '',
     'shipping_address': m.shippingAddress ?? '',
     'notes': m.notes ?? '',
+    // Client Category (client_category uid); null clears it.
+    'client_category_id': (m.clientCategoryId ?? '').isEmpty ? null : m.clientCategoryId,
   };
 
   /// Server-side duplicate check (company name / mobile / GST).

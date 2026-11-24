@@ -67,8 +67,9 @@ class ChatTopBar extends StatelessWidget implements PreferredSizeWidget {
       userName = user.name;
       userImage = user.profileImageUrl;
     } else {
-      userName = null;
-      userImage = null;
+      // Local user cache has nobody -> use the name/photo the chat API sent.
+      userName = ChatService.peerName(userUid);
+      userImage = ChatService.peerAvatar(userUid);
     }
 
     return AppBar(
@@ -372,8 +373,9 @@ class ChatTopBarDesktop extends StatelessWidget implements PreferredSizeWidget {
       userName = user.name;
       userImage = user.profileImageUrl;
     } else {
-      userName = null;
-      userImage = null;
+      // Local user cache has nobody -> use the name/photo the chat API sent.
+      userName = ChatService.peerName(userUid);
+      userImage = ChatService.peerAvatar(userUid);
     }
 
     return AppBar(

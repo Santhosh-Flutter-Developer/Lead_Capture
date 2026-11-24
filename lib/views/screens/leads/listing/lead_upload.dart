@@ -6,14 +6,12 @@ import 'package:flutter/material.dart';
 import 'package:iconsax/iconsax.dart';
 import 'package:leadcapture/models/src/lead_model.dart';
 import 'package:leadcapture/models/src/lead_source_model.dart';
-import 'package:leadcapture/models/src/lead_category_model.dart';
 import 'package:leadcapture/models/src/lead_priority_model.dart';
 import 'package:leadcapture/models/src/lead_status_model.dart';
 import 'package:leadcapture/models/src/client_model.dart';
 import 'package:leadcapture/models/src/employee_model.dart';
 import 'package:leadcapture/services/firebase/src/follow_up_access.dart';
 import 'package:leadcapture/services/database/src/spdb.dart';
-import 'package:leadcapture/services/firebase/src/lead_category_service.dart';
 import 'package:leadcapture/services/firebase/src/lead_priority_service.dart';
 import 'package:leadcapture/services/firebase/src/lead_service.dart';
 import 'package:leadcapture/services/firebase/src/lead_source_service.dart';
@@ -99,9 +97,9 @@ class _LeadUploadState extends State<LeadUpload> {
 
   // ── column layout (same order as the downloadable template) ─────────────
   //  0 Master Client (Company Name) *   1 Contact Name   2 Contact Mobile
-  //  3 Lead Name *      4 Lead Email     5 Lead Source *  6 Lead Category *
-  //  7 Lead Priority *  8 Status         9 Lead Value     10 Project Name
-  //  11 Follow Up (employee NAME)        12 Project Description   13 Note
+  //  3 Lead Name *      4 Lead Email     5 Lead Source *  6 Lead Priority *
+  //  7 Status           8 Lead Value     9 Project Name
+  //  10 Follow Up (employee NAME)        11 Project Description   12 Note
   //
   // Contact Name / Contact Mobile are only needed when the Master Client does
   // not exist yet; for an existing Master Client they are ignored.
@@ -111,14 +109,13 @@ class _LeadUploadState extends State<LeadUpload> {
       _cLeadName = 3,
       _cEmail = 4,
       _cSource = 5,
-      _cCategory = 6,
-      _cPriority = 7,
-      _cStatus = 8,
-      _cValue = 9,
-      _cProject = 10,
-      _cFollowUp = 11,
-      _cProjectDesc = 12,
-      _cNote = 13;
+      _cPriority = 6,
+      _cStatus = 7,
+      _cValue = 8,
+      _cProject = 9,
+      _cFollowUp = 10,
+      _cProjectDesc = 11,
+      _cNote = 12;
 
   static const String _defaultStatus = 'New';
 
@@ -202,9 +199,6 @@ class _LeadUploadState extends State<LeadUpload> {
       if (_cell(row, _cSource).isEmpty) {
         errors.add('Row $n: Lead Source is required');
       }
-      if (_cell(row, _cCategory).isEmpty) {
-        errors.add('Row $n: Lead Category is required');
-      }
       if (_cell(row, _cPriority).isEmpty) {
         errors.add('Row $n: Lead Priority is required');
       }
@@ -284,7 +278,6 @@ class _LeadUploadState extends State<LeadUpload> {
         for (final c in masterClients) _key(c.companyName ?? ''): c,
       };
       final sourceCache = <String, LeadSourceModel>{};
-      final categoryCache = <String, LeadCategoryModel>{};
       final priorityCache = <String, LeadPriorityModel>{};
       final statusCache = <String, LeadStatusModel>{};
 
@@ -319,10 +312,6 @@ class _LeadUploadState extends State<LeadUpload> {
           final source = sourceCache[_key(sourceName)] ??=
               await LeadSourceService.getByNameOrCreate(name: sourceName);
 
-          final categoryName = _cell(row, _cCategory);
-          final category = categoryCache[_key(categoryName)] ??=
-              await LeadCategoryService.getByNameOrCreate(name: categoryName);
-
           final priorityName = _cell(row, _cPriority);
           final priority = priorityCache[_key(priorityName)] ??=
               await LeadPriorityService.getByNameOrCreate(name: priorityName);
@@ -344,7 +333,7 @@ class _LeadUploadState extends State<LeadUpload> {
             leadName: _cell(row, _cLeadName),
             leadEmail: _cell(row, _cEmail),
             leadSource: source,
-            leadCategory: category.uid ?? '',
+            leadCategory: '',
             leadPriority: priority.uid ?? '',
             leadValue: double.tryParse(_cell(row, _cValue)) ?? 0,
             leadStatus: status.uid ?? '',
@@ -510,7 +499,7 @@ class _LeadUploadState extends State<LeadUpload> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Required: Master Client (Company Name), Lead Name, Lead Source, Lead Category and Lead Priority. '
+                        'Required: Master Client (Company Name), Lead Name, Lead Source and Lead Priority. '
                         'If the Master Client already exists it is reused; otherwise it is created from the Contact Name and Contact Mobile (10 digits) columns. '
                         'Follow Up takes the employee name and is optional; Status defaults to New.',
                       ),

@@ -235,7 +235,8 @@ class _RolePermissionTableState extends State<RolePermissionTable> {
                               ),
                               const SizedBox(width: 8),
                               Text(
-                                row.page,
+                                // Permission key stays 'Lead Category'; shown as Client Category.
+                                row.page == 'Lead Category' ? 'Client Category' : row.page,
                                 style: Theme.of(context).textTheme.bodySmall
                                     ?.copyWith(fontWeight: FontWeight.w600),
                               ),

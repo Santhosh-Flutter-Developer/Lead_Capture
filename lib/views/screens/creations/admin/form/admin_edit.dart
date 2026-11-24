@@ -632,10 +632,26 @@ class _AdminUpdateState extends State<AdminUpdate> {
 
       await AdminService.updateAdmin(id: widget.id, data: adminModel);
 
+      // Did the logged-in admin change THEIR OWN password? Then the session
+      // must end and they log in again with the new password.
+      final myUid = await Spdb.getUid();
+      final ownPasswordChanged =
+          _passwordController.text.isNotEmpty && myUid == widget.id;
+
       if (Navigator.canPop(context)) {
         Navigator.pop(context);
       }
       Navigator.pop(context, true);
+      if (ownPasswordChanged) {
+        FlushBar.show(
+          context,
+          "Password changed successfully. Please login again.",
+          isSuccess: true,
+        );
+        await Future.delayed(const Duration(milliseconds: 1500));
+        await forceLogout();
+        return;
+      }
       FlushBar.show(context, "Admin updated successfully", isSuccess: true);
     } catch (e, st) {
       if (Navigator.canPop(context)) {

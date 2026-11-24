@@ -102,7 +102,6 @@ class _LeadsListingViewState extends State<LeadsListingView> {
   DateTime? _fromDate;
   DateTime? _toDate;
   String? _selectedStatus;
-  String? _selectedCategory;
   String? _selectedCreatedBy;
   String? _selectedSource;
   String? _selectedPriority; // priority name
@@ -182,14 +181,6 @@ class _LeadsListingViewState extends State<LeadsListingView> {
     }).toList();
   }
 
-  List<String> categoryItems(Box<Map<dynamic, dynamic>> box) {
-    return box.keys.map((key) {
-      final data = CacheService.normalizeFromCache(box.get(key) ?? {});
-      final model = LeadCategoryModel.fromMap(key, data);
-      return model.name;
-    }).toList();
-  }
-
   List<String> employeeItems(CacheService cache) {
     return cache.getAllListenableEmployees().value.map((e) => e.name).toList();
   }
@@ -203,7 +194,6 @@ class _LeadsListingViewState extends State<LeadsListingView> {
       _fromDate = null;
       _toDate = null;
       _selectedStatus = null;
-      _selectedCategory = null;
       _selectedCreatedBy = null;
       _selectedSource = null;
       _selectedPriority = null;
@@ -678,13 +668,11 @@ class _LeadsListingViewState extends State<LeadsListingView> {
       _filterWidth = 180;
     }
     if (!Hive.isBoxOpen('leadStatus') ||
-        !Hive.isBoxOpen('leadCategory') ||
         !Hive.isBoxOpen('employees')) {
       return _buildSearchField(onSearchChanged);
     }
 
     final statusBox = Hive.box<Map<dynamic, dynamic>>('leadStatus');
-    final categoryBox = Hive.box<Map<dynamic, dynamic>>('leadCategory');
     final cache = CacheService();
 
     final filters = [
@@ -747,33 +735,6 @@ class _LeadsListingViewState extends State<LeadsListingView> {
           );
 
           setState(() => _selectedStatus = selectedModel);
-          _applyFilters();
-        },
-      ),
-
-      _filterDropdown(
-        label: "Lead Category",
-        value: _selectedCategory != null
-            ? LeadCategoryModel.fromMap(
-                _selectedCategory!,
-                Map<String, dynamic>.from(
-                  categoryBox.get(_selectedCategory!) ?? {},
-                ),
-              ).name
-            : null,
-        items: categoryItems(categoryBox),
-        onChanged: (v) {
-          final selectedModel = categoryBox.keys.firstWhere(
-            (key) =>
-                LeadCategoryModel.fromMap(
-                  key,
-                  Map<String, dynamic>.from(categoryBox.get(key) ?? {}),
-                ).name ==
-                v,
-            orElse: () => '',
-          );
-
-          setState(() => _selectedCategory = selectedModel);
           _applyFilters();
         },
       ),
@@ -1240,12 +1201,6 @@ class _LeadsListingViewState extends State<LeadsListingView> {
           .toList();
     }
 
-    if (_selectedCategory != null) {
-      filtered = filtered
-          .where((e) => e.leadCategory == _selectedCategory)
-          .toList();
-    }
-
     if (_selectedCreatedBy != null) {
       filtered = filtered
           .where((e) => e.createdBy.uid == _selectedCreatedBy)
@@ -1542,9 +1497,7 @@ class _LeadsListingViewState extends State<LeadsListingView> {
               ),
               onPressed: () async {
                 try {
-                  // Fetch all categories, priorities, and statuses
-                  final categories =
-                      await LeadCategoryService.getAllLeadCategories();
+                  // Fetch all priorities and statuses
                   final priorities =
                       await LeadPriorityService.getAllLeadPriority();
                   final statuses = await LeadStatusService.getAllLeadStatus();
@@ -1554,7 +1507,6 @@ class _LeadsListingViewState extends State<LeadsListingView> {
                     'Lead Name',
                     'Email',
                     'Source',
-                    'Category',
                     'Priority',
                     'Value',
                     'Status',
@@ -1569,14 +1521,6 @@ class _LeadsListingViewState extends State<LeadsListingView> {
                   ]);
 
                   for (var lead in _filteredLeads) {
-                    final category = categories.firstWhere(
-                      (c) => c.uid == lead.leadCategory,
-                      orElse: () => LeadCategoryModel(
-                        name: lead.leadCategory,
-                        description: '',
-                        createdBy: UserDataModel.fromEmptyMap(),
-                      ),
-                    );
                     final priority = priorities.firstWhere(
                       (p) => p.uid == lead.leadPriority,
                       orElse: () => LeadPriorityModel(
@@ -1601,7 +1545,6 @@ class _LeadsListingViewState extends State<LeadsListingView> {
                       lead.leadName,
                       lead.leadEmail,
                       lead.leadSource.name,
-                      category.name,
                       priority.name,
                       lead.leadValue.toString(),
                       status.name,
@@ -1756,7 +1699,6 @@ class _LeadsListingViewState extends State<LeadsListingView> {
     PaginatedDataController<LeadModel> controllerRead,
   ) {
     bool isSelected = controllerWatch.selectedIds.contains(lead.uid);
-    var leadCategory = CacheService.leadCategoryByUid(lead.leadCategory);
 
     /// Open Lead View
     void openLead(BuildContext context, LeadModel lead) async {
@@ -1845,11 +1787,11 @@ class _LeadsListingViewState extends State<LeadsListingView> {
           ),
         ),
 
-        /// Category
+        /// Source
         dataCell(
           context,
           Text(
-            leadCategory?.name ?? '',
+            lead.leadSource.name,
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ),

@@ -20,7 +20,7 @@ class LeadCategoryBloc extends Bloc<LeadCategoryEvent, LeadCategoryState> {
   ) async {
     emit(LeadCategoryLoading());
     await emit.forEach(
-      ApiLive.watch({'lead_category'}, () async {
+      ApiLive.watch({MasterTypes.leadCategory}, () async {
         allLeadCategorys = await LeadCategoryService.getAllLeadCategories();
         return allLeadCategorys;
       }),

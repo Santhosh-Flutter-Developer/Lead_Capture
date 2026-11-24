@@ -321,7 +321,12 @@ class LeadService {
       final res = (await LeadsApiService.call('list')).ensureSuccess();
       final leads = res.dataList.map((r) => CrmMappers.lead(Js.m(r))).toList();
       leads.sort((a, b) => a.leadName.compareTo(b.leadName));
-      return FollowUpAccess.filterVisible(leads, (l) => l.followUp);
+      // Creator AND the follow-up staff can see the lead (matches leads.php).
+      return FollowUpAccess.filterVisible(
+        leads,
+        (l) => l.followUp,
+        createdByOf: (l) => l.createdBy.uid,
+      );
     } catch (e, st) {
       _fail('Error fetching leads', e, st);
     }

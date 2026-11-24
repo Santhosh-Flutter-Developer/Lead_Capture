@@ -216,6 +216,44 @@ class AuthService {
     }
   }
 
+  /// Logged-in user sets a new password for their own account from My Profile
+  /// (single field, no current/confirm password). The caller must log the user
+  /// out afterwards. Throws a readable String.
+  ///
+  /// 1. `auth.php?action=set_password` (any logged-in user), and when the server
+  ///    does not have that action yet ("Unknown auth action"):
+  /// 2. the existing employee update (`employees.php?action=update` with
+  ///    `password`) - needs the Employees > edit permission on the server.
+  static Future<void> setPassword({required String newPassword}) async {
+    try {
+      try {
+        (await AuthApiService.setPassword(newPassword: newPassword))
+            .ensureSuccess();
+        return;
+      } catch (e) {
+        final unknownAction = e is ApiException &&
+            e.message.toLowerCase().contains('unknown auth action');
+        if (!unknownAction) rethrow;
+      }
+
+      final uid = await Spdb.getUid() ?? '';
+      final employee = uid.isEmpty ? null : await EmployeeService.getEmployee(uid: uid);
+      if (employee == null) {
+        throw 'Could not load your profile to update the password.';
+      }
+      await EmployeeService.editEmployee(
+        uid: uid,
+        employee: employee.copyWith(
+          password: newPassword,
+          updatedAt: DateTime.now(),
+        ),
+      );
+    } catch (e, st) {
+      debugPrint('Error setting password: $e, $st');
+      throw e is ApiException ? e.message : e.toString();
+    }
+  }
+
   // ── Push-token helpers (FCM stays; PHP has no token store yet) ──────────
 
   static Future<void> removeFcmTokenEverywhere(String token) async {}

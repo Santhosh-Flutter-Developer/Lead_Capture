@@ -66,7 +66,6 @@ class _LeadsViewState extends State<LeadsView> with TickerProviderStateMixin {
   final TextEditingController _commentController = TextEditingController();
   final ScrollController _vScrollController = ScrollController();
   late LeadModel _lead;
-  late LeadCategoryModel widgetLeadCategory;
   late TabController _tabController;
   PermissionModel? _permissions;
 
@@ -74,16 +73,9 @@ class _LeadsViewState extends State<LeadsView> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _lead = widget.lead;
-    _syncLeadCategory();
     _tabController = TabController(length: 5, vsync: this);
     _loadOwnership();
     _refreshLead();
-  }
-
-  void _syncLeadCategory() {
-    widgetLeadCategory =
-        CacheService.leadCategoryByUid(_lead.leadCategory) ??
-        LeadCategoryModel.fromEmptyMap();
   }
 
   Future<void> _refreshLead() async {
@@ -94,7 +86,6 @@ class _LeadsViewState extends State<LeadsView> with TickerProviderStateMixin {
       if (!mounted) return;
       setState(() {
         _lead = fresh;
-        _syncLeadCategory();
       });
     } catch (_) {}
   }
@@ -826,7 +817,6 @@ class _LeadsViewState extends State<LeadsView> with TickerProviderStateMixin {
       children: [
         _infoSection("Engagement Details", [
           _dataPoint(Iconsax.sms, "Email Address", _lead.leadEmail),
-          _dataPoint(Iconsax.category, "Lead Segment", widgetLeadCategory.name),
           _dataPoint(Iconsax.user_add, "Assigned Agent", _lead.createdBy.name),
           _dataPoint(
             Iconsax.calendar_1,

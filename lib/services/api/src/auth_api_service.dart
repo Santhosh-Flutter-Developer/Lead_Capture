@@ -68,6 +68,11 @@ class AuthApiService {
       _c.post(ApiEndpoints.auth,
           action: 'change_password', body: {'current_password': currentPassword, 'new_password': newPassword});
 
+  /// New password only (no current/confirm), for the logged-in user.
+  static Future<ApiResponse> setPassword({required String newPassword}) =>
+      _c.post(ApiEndpoints.auth,
+          action: 'set_password', body: {'new_password': newPassword});
+
   static Future<ApiResponse> checkSession() => _c.post(ApiEndpoints.auth, action: 'check_session', body: {});
 
   static Future<ApiResponse> getMyProfile() => _c.post(ApiEndpoints.employees, action: 'get_my_profile', body: {});

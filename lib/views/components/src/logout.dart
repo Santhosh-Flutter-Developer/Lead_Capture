@@ -13,6 +13,7 @@ Future<void> _clearSession() async {
     await RealtimeService.stop(); // WebSocket
   } catch (_) {}
   UserStatusService.reset();
+  await ChatService.reset(); // stop chat polling + drop previous user's cache
   await AuthService.removeCurrentDeviceFcm(); // Android / iOS / Web token
   await Spdb.clearDb();
 }

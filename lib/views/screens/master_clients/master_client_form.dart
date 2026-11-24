@@ -34,6 +34,10 @@ class _MasterClientFormState extends State<MasterClientForm> {
   ClientModel? _client;
   late Future<void> _future;
 
+  // Client Category (client_category master) assigned to this Master Client.
+  List<LeadCategoryModel> _categories = [];
+  LeadCategoryModel? _category;
+
   // Location hierarchy: Country -> State -> District -> City.
   // Each list below is derived from the selection above it.
   RegionModel? _country;
@@ -76,6 +80,11 @@ class _MasterClientFormState extends State<MasterClientForm> {
 
   Future<void> _load() async {
     try {
+      _categories = await LeadCategoryService.getAllLeadCategories();
+    } catch (e, st) {
+      await ErrorService.recordError(e, st);
+    }
+    try {
       _countries = await RegionDataService.getCountries();
       _countryNames = _countries.map((e) => e.name).toList();
       // India is pre-selected by default.
@@ -106,6 +115,14 @@ class _MasterClientFormState extends State<MasterClientForm> {
       _postal.text = c.postalCode ?? '';
       _gst.text = c.gstVatNumber ?? '';
       _officePhone.text = c.officePhoneNo ?? '';
+      _category = _categories.cast<LeadCategoryModel?>().firstWhere(
+        (e) =>
+            e?.uid == c.clientCategoryId ||
+            (c.clientCategoryId == null &&
+                (c.clientCategoryName ?? '').isNotEmpty &&
+                e?.name == c.clientCategoryName),
+        orElse: () => null,
+      );
     } catch (e, st) {
       await ErrorService.recordError(e, st);
       if (mounted) FlushBar.show(context, e.toString(), isSuccess: false);
@@ -298,6 +315,19 @@ class _MasterClientFormState extends State<MasterClientForm> {
             hintText: 'Enter GST / VAT number',
           ),
         ),
+        box(
+          FormDropdownSearch(
+            key: ValueKey('category_${_categories.length}_${_category?.uid}'),
+            label: 'Client Category',
+            isRequired: true,
+            initialItem: _category?.name,
+            items: _categories.map((e) => e.name).toList(),
+            onChanged: (v) => _category = _categories
+                .cast<LeadCategoryModel?>()
+                .firstWhere((e) => e?.name == v, orElse: () => null),
+            validator: (v) => v == null ? '* Client category is required' : null,
+          ),
+        ),
         // ── Location: Country → State → District → City ─────────────
         box(
           FormDropdownSearch(
@@ -388,6 +418,9 @@ class _MasterClientFormState extends State<MasterClientForm> {
           district: _district,
           city: _city,
           clearLocation: true,
+          clientCategoryId: _category?.uid,
+          clientCategoryName: _category?.name,
+          clearCategory: true,
           isCompany: true,
           updatedAt: DateTime.now(),
         );
@@ -405,6 +438,8 @@ class _MasterClientFormState extends State<MasterClientForm> {
           state: _state,
           district: _district,
           city: _city,
+          clientCategoryId: _category?.uid,
+          clientCategoryName: _category?.name,
           loginAllowed: false,
           receiveEmailNotifications: false,
           createdBy: await Spdb.getUser(),

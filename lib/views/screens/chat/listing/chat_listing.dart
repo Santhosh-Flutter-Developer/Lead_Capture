@@ -902,16 +902,23 @@ class _ChatListItemState extends State<_ChatListItem> {
 
     var user = CacheService.getUserByUid(opponentUid);
 
-    final String name = isSelfChat ? 'You' : (user?.name ?? '');
+    // Local user cache first; fall back to the name/photo the chat API sent.
+    final String name = isSelfChat
+        ? 'You'
+        : ((user?.name ?? '').toString().isNotEmpty
+              ? user.name.toString()
+              : (ChatService.peerName(opponentUid) ?? ''));
 
     final String imageUrl = user is EmployeeModel
         ? (user.profileImageUrl ?? '')
         : user is AdminModel
         ? (user.profileImageUrl ?? '')
         : '';
+    final String shownImageUrl =
+        imageUrl.isNotEmpty ? imageUrl : (ChatService.peerAvatar(opponentUid) ?? '');
 
     final bool nameValid = name.isNotEmpty;
-    final bool avatarValid = imageUrl.isNotEmpty;
+    final bool avatarValid = shownImageUrl.isNotEmpty;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -955,7 +962,7 @@ class _ChatListItemState extends State<_ChatListItem> {
                             ? ClipRRect(
                                 borderRadius: BorderRadius.circular(100),
                                 child: CachedNetworkImage(
-                                  imageUrl: imageUrl,
+                                  imageUrl: shownImageUrl,
                                   placeholder: (context, url) =>
                                       Shimmer.fromColors(
                                         baseColor: Theme.of(
