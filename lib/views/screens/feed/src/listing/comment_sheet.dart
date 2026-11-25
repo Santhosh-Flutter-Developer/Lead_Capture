@@ -5,11 +5,16 @@ class CommentSheet extends StatefulWidget {
   final String? currentUserUid;
   final List<CommentModel> initialComments;
 
+  /// When true the sheet is rendered as a right-side panel (desktop/web):
+  /// blue gradient header with a count badge, no drag handle, square corners.
+  final bool asSidePanel;
+
   const CommentSheet({
     super.key,
     required this.feedId,
     this.currentUserUid,
     required this.initialComments,
+    this.asSidePanel = false,
   });
 
   @override
@@ -32,6 +37,7 @@ class CommentSheetState extends State<CommentSheet> {
   @override
   void initState() {
     super.initState();
+    _comments = List<CommentModel>.from(widget.initialComments);
     _future = _init();
   }
 
@@ -350,14 +356,20 @@ class CommentSheetState extends State<CommentSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: MediaQuery.of(context).size.height * 0.85,
+      height: widget.asSidePanel
+          ? double.infinity
+          : MediaQuery.of(context).size.height * 0.85,
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: widget.asSidePanel
+            ? BorderRadius.zero
+            : const BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: Column(
         children: [
+          if (widget.asSidePanel) _buildPanelHeader(),
           // Header / Drag Handle
+          if (!widget.asSidePanel) ...[
           Center(
             child: Container(
               margin: const EdgeInsets.symmetric(vertical: 12),
@@ -393,6 +405,7 @@ class CommentSheetState extends State<CommentSheet> {
             ),
           ),
           const Divider(height: 1),
+          ],
 
           // Comments List
           Expanded(
@@ -470,6 +483,90 @@ class CommentSheetState extends State<CommentSheet> {
             ),
           _buildInputArea(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildPanelHeader() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 14, 12, 14),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFF1D4ED8), Color(0xFF3B82F6), Color(0xFF60A5FA)],
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+        ),
+      ),
+      child: Row(
+        children: [
+          const Text(
+            'Comments',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+              fontSize: 17,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              '${_comments.length}',
+              style: const TextStyle(
+                color: Color(0xFF1D4ED8),
+                fontWeight: FontWeight.w800,
+                fontSize: 11,
+              ),
+            ),
+          ),
+          const Spacer(),
+          InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => Navigator.pop(context),
+            child: Container(
+              padding: const EdgeInsets.all(5),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.25),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.close, size: 16, color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _commentAction({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(6),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 12, color: color),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -585,45 +682,36 @@ class CommentSheetState extends State<CommentSheet> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                Row(
+                Wrap(
+                  spacing: 14,
+                  runSpacing: 4,
                   children: [
-                    GestureDetector(
+                    _commentAction(
+                      icon: Icons.favorite,
+                      label: 'Like',
+                      color: Colors.red,
                       onTap: () => _toggleReaction(comment, "❤️"),
-                      child: Text(
-                        "Like",
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
                     ),
-                    SizedBox(width: 16),
-                    GestureDetector(
+                    _commentAction(
+                      icon: Icons.reply,
+                      label: 'Reply',
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                       onTap: () => _setReply(comment),
-                      child: Text(
-                        "Reply",
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
                     ),
-                    if (isOwner) ...[
-                      const SizedBox(width: 16),
-                      GestureDetector(
-                        onTap: () => _deleteComment(comment),
-                        child: const Text(
-                          "Delete",
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.red,
-                          ),
-                        ),
+                    if (isOwner)
+                      _commentAction(
+                        icon: Icons.edit_outlined,
+                        label: 'Edit',
+                        color: Theme.of(context).colorScheme.primary,
+                        onTap: () => _editComment(comment),
                       ),
-                    ],
+                    if (isOwner || _isAdmin)
+                      _commentAction(
+                        icon: Icons.delete_outline,
+                        label: 'Delete',
+                        color: Colors.red,
+                        onTap: () => _deleteComment(comment),
+                      ),
                   ],
                 ),
                 if (comment.reactions.isNotEmpty)
@@ -640,12 +728,10 @@ class CommentSheetState extends State<CommentSheet> {
                               vertical: 4,
                             ),
                             decoration: BoxDecoration(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.surfaceContainer,
+                              color: Colors.red.withValues(alpha: 0.08),
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
-                                color: Theme.of(context).dividerColor,
+                                color: Colors.red.withValues(alpha: 0.25),
                               ),
                             ),
                             child: Text(

@@ -14,10 +14,16 @@ class FeedLoading extends FeedState {}
 class FeedLoaded extends FeedState {
   final List<FeedModel> feeds;
 
-  const FeedLoaded(this.feeds);
+  // Unique per emitted state. Like/save toggles mutate the same FeedModel
+  // objects in place, so without this Equatable saw "same feeds" and
+  // BlocBuilder skipped the rebuild (e.g. an unsaved post stayed visible in
+  // the Saved Posts tab until a manual refresh).
+  final int _stamp = DateTime.now().microsecondsSinceEpoch;
+
+  FeedLoaded(this.feeds);
 
   @override
-  List<Object?> get props => [feeds];
+  List<Object?> get props => [feeds, _stamp];
 }
 
 class FeedError extends FeedState {

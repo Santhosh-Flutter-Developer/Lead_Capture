@@ -22,6 +22,62 @@ class FeedAppColors {
   static const Color textSecondary = Color(0xFF64748B);
 }
 
+enum FeedTab { all, mine, saved, polls }
+
+extension FeedTabX on FeedTab {
+  String get label {
+    switch (this) {
+      case FeedTab.all:
+        return 'All Posts';
+      case FeedTab.mine:
+        return 'My Posts';
+      case FeedTab.saved:
+        return 'Saved Posts';
+      case FeedTab.polls:
+        return 'Polls';
+    }
+  }
+
+  IconData get icon {
+    switch (this) {
+      case FeedTab.all:
+        return Icons.grid_view_rounded;
+      case FeedTab.mine:
+        return Icons.person;
+      case FeedTab.saved:
+        return Icons.bookmark;
+      case FeedTab.polls:
+        return Icons.bar_chart_rounded;
+    }
+  }
+
+  String get emptyTitle {
+    switch (this) {
+      case FeedTab.all:
+        return 'No posts yet';
+      case FeedTab.mine:
+        return "You haven't posted anything yet";
+      case FeedTab.saved:
+        return 'No saved posts';
+      case FeedTab.polls:
+        return 'No polls yet';
+    }
+  }
+
+  String get emptySubtitle {
+    switch (this) {
+      case FeedTab.all:
+        return 'Be the first to share an update with the team.';
+      case FeedTab.mine:
+        return 'Tap Create Post to share something with the team.';
+      case FeedTab.saved:
+        return 'Tap the bookmark icon on a post to save it here.';
+      case FeedTab.polls:
+        return 'Create a post with a poll to see it here.';
+    }
+  }
+}
+
 class _CommentAuthorDisplay {
   final String name;
   final String avatar;
@@ -39,6 +95,8 @@ class FeedListing extends StatefulWidget {
 class _FeedListingState extends State<FeedListing> {
   String? _currentUserUid;
   ScrollController _scrollController = ScrollController();
+  FeedTab _tab = FeedTab.all;
+  List<FeedModel>? _cachedFeeds;
 
 
   @override
@@ -63,14 +121,315 @@ class _FeedListingState extends State<FeedListing> {
     context.read<FeedBloc>().add(RefreshFeeds());
   }
 
+  Future<void> _openCreate() async {
+    dynamic result;
+    if (kIsMobile) {
+      result = await Sheet.showSheet(context, widget: const FeedCreate());
+    } else {
+      result = await GeneralDialog.showRTLSheet(context, const FeedCreate());
+    }
+    if (result == true && mounted) {
+      _refreshFeed();
+    }
+  }
+
+  List<FeedModel> _applyTab(List<FeedModel> feeds) {
+    final uid = _currentUserUid;
+    switch (_tab) {
+      case FeedTab.all:
+        return feeds;
+      case FeedTab.mine:
+        return feeds.where((f) => uid != null && f.authorId == uid).toList();
+      case FeedTab.saved:
+        return feeds.where((f) => uid != null && f.savedBy.contains(uid)).toList();
+      case FeedTab.polls:
+        return feeds.where((f) => f.poll != null).toList();
+    }
+  }
+
+  Widget _buildBanner(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 22),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: const LinearGradient(
+          colors: [Color(0xFF1D4ED8), Color(0xFF3B82F6), Color(0xFF60A5FA)],
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF2563EB).withValues(alpha: 0.25),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Icon(
+              Icons.dynamic_feed_rounded,
+              color: Colors.white,
+              size: 28,
+            ),
+          ),
+          const SizedBox(width: 16),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Community Feed',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                SizedBox(height: 2),
+                Text(
+                  'Stay updated with company announcements, polls, and discussions',
+                  style: TextStyle(color: Colors.white, fontSize: 12.5),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          OutlinedButton.icon(
+            onPressed: _refreshFeed,
+            icon: const Icon(Iconsax.refresh, size: 16, color: Colors.white),
+            label: const Text(
+              'Refresh',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+            ),
+            style: OutlinedButton.styleFrom(
+              backgroundColor: Colors.white.withValues(alpha: 0.15),
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.4)),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          ElevatedButton.icon(
+            onPressed: _openCreate,
+            icon: const Icon(Icons.add, size: 18, color: Color(0xFF1D4ED8)),
+            label: const Text(
+              'Create Post',
+              style: TextStyle(
+                color: Color(0xFF1D4ED8),
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTabsBar(BuildContext context, int count) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: theme.brightness == Brightness.light
+            ? Colors.white
+            : theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: FeedTab.values.map((tab) {
+                  final selected = tab == _tab;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(20),
+                      onTap: () => setState(() => _tab = tab),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 7,
+                        ),
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? FeedAppColors.primary
+                              : theme.scaffoldBackgroundColor,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: selected
+                                ? const Color(0xFF1E3A8A)
+                                : theme.colorScheme.outlineVariant,
+                            width: selected ? 2 : 1,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              tab.icon,
+                              size: 14,
+                              color: selected
+                                  ? Colors.white
+                                  : FeedAppColors.textSecondary,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              tab.label,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: selected
+                                    ? Colors.white
+                                    : FeedAppColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '$count ${count == 1 ? 'post' : 'posts'}',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: theme.colorScheme.onSurface,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmpty(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 60),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primary.withValues(alpha: 0.08),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                _tab.icon,
+                size: 40,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _tab.emptyTitle,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: theme.colorScheme.onSurface,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _tab.emptySubtitle,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Masonry-style layout: cards size to their own content (image, poll,
+  /// caption), so they are distributed round-robin into N columns.
+  Widget _buildFeedLayout(List<FeedModel> feeds, bool isNarrow) {
+    if (isNarrow) {
+      return Column(
+        children: [
+          for (final feed in feeds) ...[
+            FeedCard(
+              key: ValueKey(feed.uid),
+              feed: feed,
+              currentUserUid: _currentUserUid,
+              onRefresh: _refreshFeed,
+              fixedMediaHeight: 280,
+            ),
+            const SizedBox(height: 12),
+          ],
+        ],
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final int columns = constraints.maxWidth >= 1100
+            ? 3
+            : (constraints.maxWidth >= 700 ? 2 : 1);
+        final cols = List.generate(columns, (_) => <FeedModel>[]);
+        for (var i = 0; i < feeds.length; i++) {
+          cols[i % columns].add(feeds[i]);
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var c = 0; c < columns; c++) ...[
+              if (c > 0) const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  children: [
+                    for (final feed in cols[c]) ...[
+                      FeedCard(
+                        key: ValueKey(feed.uid),
+                        feed: feed,
+                        currentUserUid: _currentUserUid,
+                        onRefresh: _refreshFeed,
+                        fixedMediaHeight: 230,
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
-    final isDesktop = screenWidth > 900;
     final bool isNarrow = screenWidth < 700;
-    final crossAxisCount = isDesktop
-        ? 3
-        : 2; // Pro dashboard often uses 3 on wide screens
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -141,149 +500,73 @@ class _FeedListingState extends State<FeedListing> {
         child: FloatingActionButton(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        onPressed: () async {
-          if (kIsMobile) {
-            final result = await Sheet.showSheet(
-              context,
-              widget: const FeedCreate(),
-            );
-            if (result == true && mounted) {
-              _refreshFeed();
-            }
-          } else {
-            final result = await GeneralDialog.showRTLSheet(
-              context,
-              const FeedCreate(),
-            );
-            if (result == true && mounted) {
-              _refreshFeed();
-            }
-          }
-        },
+        onPressed: _openCreate,
         child: const Icon(Iconsax.add, color: Colors.white),
         ),
       ),
       body: BlocBuilder<FeedBloc, FeedState>(
         builder: (context, state) {
-          if (state is FeedLoading) {
-            return const Center(child: WaitingLoading());
-          }
+          if (state is FeedLoaded) _cachedFeeds = state.feeds;
           if (state is FeedError) return ErrorDisplay(error: state.message);
 
-          if (state is FeedLoaded) {
-            if (state.feeds.isEmpty) {
-              return Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.primary.withValues(alpha: 0.08),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        Iconsax.gallery,
-                        size: 40,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      "No posts yet",
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      "Be the first to share an update with the team.",
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              );
+          final allFeeds = _cachedFeeds;
+          if (allFeeds == null) {
+            if (state is FeedLoading || state is FeedInitial) {
+              return const Center(child: WaitingLoading());
             }
+            return const SizedBox.shrink();
+          }
 
-            return RefreshIndicator(
-              onRefresh: () async => _refreshFeed(),
-              child: Scrollbar(
-                    controller: _scrollController,
-                    thumbVisibility: true,
-                    interactive: true,
-                    trackVisibility: true,
-                    radius: const Radius.circular(8),
-                    thickness: 8,
-                child: ScrollConfiguration(
-                  // The app shell (desktop_main_screen.dart) already wraps
-                  // every page in its own Scrollbar. Flutter's default
-                  // behavior additionally auto-draws a scrollbar on any
-                  // Scrollable on web/desktop, which was showing up right
-                  // next to the shell's one - two adjacent scrollbars for
-                  // what looks like a single scroll region. This disables
-                  // just the automatic one for Feed's own list/grid.
-                  behavior: ScrollConfiguration.of(
-                    context,
-                  ).copyWith(scrollbars: false),
+          final feeds = _applyTab(allFeeds);
+
+          return RefreshIndicator(
+            onRefresh: () async => _refreshFeed(),
+            child: Scrollbar(
+              controller: _scrollController,
+              thumbVisibility: true,
+              interactive: true,
+              trackVisibility: true,
+              radius: const Radius.circular(8),
+              thickness: 8,
+              child: ScrollConfiguration(
+                // The app shell already draws its own scrollbar; disable the
+                // automatic one so two scrollbars don't appear side by side.
+                behavior: ScrollConfiguration.of(
+                  context,
+                ).copyWith(scrollbars: false),
+                child: SingleChildScrollView(
+                  controller: _scrollController,
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: EdgeInsets.fromLTRB(
+                    isNarrow ? 12 : 20,
+                    isNarrow ? 12 : 20,
+                    isNarrow ? 12 : 20,
+                    90,
+                  ),
                   child: Center(
                     child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 1200),
-                      child: isNarrow
-                          // Single column on mobile/narrow screens: a plain
-                          // list lets each card size itself to its own content
-                          // (image, poll, files, caption can all differ in
-                          // height), instead of forcing every card into the
-                          // same fixed-aspect-ratio box — which is what caused
-                        // the repeated overflow errors on narrow widths.
-                        ? ListView.separated(
-                          controller: _scrollController,
-                            padding: const EdgeInsets.all(12),
-                            itemCount: state.feeds.length,
-                            separatorBuilder: (context, index) =>
-                                const SizedBox(height: 12),
-                            itemBuilder: (context, index) {
-                              return FeedCard(
-                                key: ValueKey(state.feeds[index].uid),
-                                feed: state.feeds[index],
-                                currentUserUid: _currentUserUid,
-                                onRefresh: _refreshFeed,
-                                fixedMediaHeight: 280,
-                              );
-                            },
-                          )
-                        : GridView.builder(
-                           controller: _scrollController,
-                            padding: const EdgeInsets.all(12),
-                            gridDelegate:
-                                SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: crossAxisCount,
-                                  crossAxisSpacing: 12,
-                                  mainAxisSpacing: 12,
-                                  childAspectRatio:
-                                      0.72, // Taller aspect ratio for Instagram-like feel with text
-                                ),
-                            itemCount: state.feeds.length,
-                            itemBuilder: (context, index) {
-                              return FeedCard(
-                                key: ValueKey(state.feeds[index].uid),
-                                feed: state.feeds[index],
-                                currentUserUid: _currentUserUid,
-                                onRefresh: _refreshFeed,
-                              );
-                            },
-                          ),
+                      constraints: const BoxConstraints(maxWidth: 1600),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (!isNarrow) ...[
+                            _buildBanner(context),
+                            const SizedBox(height: 16),
+                          ],
+                          _buildTabsBar(context, feeds.length),
+                          const SizedBox(height: 16),
+                          if (feeds.isEmpty)
+                            _buildEmpty(context)
+                          else
+                            _buildFeedLayout(feeds, isNarrow),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            );
-          }
-          return const SizedBox.shrink();
+            ),
+          );
         },
       ),
     );
@@ -341,6 +624,7 @@ class FeedCardState extends State<FeedCard> {
   late String _postAuthorName;
   late String _postAuthorAvatar;
   bool _isAdmin = false;
+  bool _isVoting = false;
     ScrollController viewpostscrollController = ScrollController();
 
   Future<void> _checkAdmin() async {
@@ -539,136 +823,19 @@ class FeedCardState extends State<FeedCard> {
                 460.0,
               );
 
-              return Dialog(
-                insetPadding: isNarrowDialog
-                    ? EdgeInsets.zero
-                    : const EdgeInsets.all(24),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxWidth: isNarrowDialog ? double.infinity : 820,
-                    maxHeight: isNarrowDialog ? double.infinity : 900,
-                  ),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).brightness == Brightness.light
-                          ? Colors.white
-                          : Theme.of(context).colorScheme.surface,
-                      borderRadius: isNarrowDialog
-                          ? BorderRadius.zero
-                          : BorderRadius.circular(20),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Header
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(18, 16, 12, 12),
-                          child: Row(
-                            children: [
-                              InkWell(
-                                borderRadius: BorderRadius.circular(16),
-                                onTap: () => _openUserProfileFromComment(
-                                  widget.feed.authorId,
-                                ),
-                                child: Container(
-                                  padding: const EdgeInsets.all(2),
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: accent,
-                                      width: 1.5,
-                                    ),
-                                  ),
-                                  child: CircleAvatar(
-                                    radius: 18,
-                                    backgroundColor: Theme.of(
-                                      context,
-                                    ).scaffoldBackgroundColor,
-                                    backgroundImage: NetworkImage(
-                                      postAuthorAvatar.isNotEmpty
-                                          ? postAuthorAvatar
-                                          : AppStrings.emptyProfilePhotoUrl,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    InkWell(
-                                      onTap: () => _openUserProfileFromComment(
-                                        widget.feed.authorId,
-                                      ),
-                                      child: Text(
-                                        postAuthorName,
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w800,
-                                          fontSize: 14,
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.onSurface,
-                                        ),
-                                      ),
-                                    ),
-                                    Text(
-                                      _buildTimeLabel(widget.feed),
-                                      style: TextStyle(
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.onSurfaceVariant,
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              InkWell(
-                                borderRadius: BorderRadius.circular(20),
-                                onTap: () => Navigator.pop(dialogContext),
-                                child: Container(
-                                  padding: const EdgeInsets.all(6),
-                                  decoration: BoxDecoration(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .surfaceContainerHighest
-                                        .withValues(alpha: 0.6),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: Icon(
-                                    Icons.close,
-                                    size: 18,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const Divider(height: 1),
-                        
-                        // Text, Poll and Comments section
-                        Expanded(
-                          child: Scrollbar(
-                    controller: viewpostscrollController,
-                    thumbVisibility: true,
-                    interactive: true,
-                    trackVisibility: true,
-                    radius: const Radius.circular(8),
-                    thickness: 8,
-                            child: SingleChildScrollView(
-                              controller: viewpostscrollController,
-                              padding: const EdgeInsets.all(12),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  // Images section
-                                                    if (widget.feed.mediaImages.isNotEmpty)
-                            SizedBox(
-                              height: imageAreaHeight,
+              // Wide screens: image on the left (dark panel), details on the
+              // right - mirrors the reference design. Narrow: stacked layout.
+              final bool useSplit =
+                  !isNarrowDialog &&
+                  screenWidth >= 900 &&
+                  widget.feed.mediaImages.isNotEmpty;
+              final double splitHeight = (screenHeight - 48).clamp(
+                420.0,
+                600.0,
+              );
+
+              Widget buildImagePager(double? height) => SizedBox(
+                              height: height,
                               child: Stack(
                                 children: [
                                   PageView.builder(
@@ -820,7 +987,162 @@ class FeedCardState extends State<FeedCard> {
                                     ),
                                 ],
                               ),
-                            ),
+                            );
+
+              Widget wrapSplit(Widget rightColumn) {
+                if (!useSplit) return rightColumn;
+                return SizedBox(
+                  height: splitHeight,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: const BorderRadius.horizontal(
+                            left: Radius.circular(20),
+                          ),
+                          child: Container(
+                            color: const Color(0xFF0B1220),
+                            child: buildImagePager(double.infinity),
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: 400, child: rightColumn),
+                    ],
+                  ),
+                );
+              }
+
+              return Dialog(
+                insetPadding: isNarrowDialog
+                    ? EdgeInsets.zero
+                    : const EdgeInsets.all(24),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: isNarrowDialog
+                        ? double.infinity
+                        : (useSplit ? 1000 : 820),
+                    maxHeight: isNarrowDialog ? double.infinity : 900,
+                  ),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).brightness == Brightness.light
+                          ? Colors.white
+                          : Theme.of(context).colorScheme.surface,
+                      borderRadius: isNarrowDialog
+                          ? BorderRadius.zero
+                          : BorderRadius.circular(20),
+                    ),
+                    child: wrapSplit(Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Header
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(18, 16, 12, 12),
+                          child: Row(
+                            children: [
+                              InkWell(
+                                borderRadius: BorderRadius.circular(16),
+                                onTap: () => _openUserProfileFromComment(
+                                  widget.feed.authorId,
+                                ),
+                                child: Container(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: accent,
+                                      width: 1.5,
+                                    ),
+                                  ),
+                                  child: CircleAvatar(
+                                    radius: 18,
+                                    backgroundColor: Theme.of(
+                                      context,
+                                    ).scaffoldBackgroundColor,
+                                    backgroundImage: NetworkImage(
+                                      postAuthorAvatar.isNotEmpty
+                                          ? postAuthorAvatar
+                                          : AppStrings.emptyProfilePhotoUrl,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    InkWell(
+                                      onTap: () => _openUserProfileFromComment(
+                                        widget.feed.authorId,
+                                      ),
+                                      child: Text(
+                                        postAuthorName,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 14,
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSurface,
+                                        ),
+                                      ),
+                                    ),
+                                    Text(
+                                      _buildTimeLabel(widget.feed),
+                                      style: TextStyle(
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              InkWell(
+                                borderRadius: BorderRadius.circular(20),
+                                onTap: () => Navigator.pop(dialogContext),
+                                child: Container(
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .surfaceContainerHighest
+                                        .withValues(alpha: 0.6),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    Icons.close,
+                                    size: 18,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Divider(height: 1),
+                        
+                        // Text, Poll and Comments section
+                        Expanded(
+                          child: Scrollbar(
+                    controller: viewpostscrollController,
+                    thumbVisibility: true,
+                    interactive: true,
+                    trackVisibility: true,
+                    radius: const Radius.circular(8),
+                    thickness: 8,
+                            child: SingleChildScrollView(
+                              controller: viewpostscrollController,
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Images section (stacked layout only)
+                                  if (widget.feed.mediaImages.isNotEmpty && !useSplit)
+                                    buildImagePager(imageAreaHeight),
                             SizedBox(height: 10),
                                   if (widget.feed.content.trim().isNotEmpty) ...[
                                     SelectableText(
@@ -1600,7 +1922,7 @@ class FeedCardState extends State<FeedCard> {
                           ),
                         ),
                       ],
-                    ),
+                    )),
                   ),
                 ),
               );
@@ -1743,6 +2065,12 @@ class FeedCardState extends State<FeedCard> {
   @override
   void didUpdateWidget(covariant FeedCard oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (_isVoting &&
+        widget.currentUserUid != null &&
+        (widget.feed.poll?.votedUserIds.contains(widget.currentUserUid) ??
+            false)) {
+      _isVoting = false;
+    }
     if (oldWidget.feed.authorId != widget.feed.authorId ||
         oldWidget.feed.authorName != widget.feed.authorName ||
         oldWidget.feed.authorAvatar != widget.feed.authorAvatar) {
@@ -1903,14 +2231,33 @@ class FeedCardState extends State<FeedCard> {
                         await _deletePost();
                       }
                     },
-                    itemBuilder: (context) => const [
+                    itemBuilder: (context) => [
                       PopupMenuItem<String>(
                         value: 'edit',
-                        child: Text('Edit Post'),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Iconsax.edit_2,
+                              size: 16,
+                              color: theme.colorScheme.primary,
+                            ),
+                            const SizedBox(width: 10),
+                            const Text('Edit Post'),
+                          ],
+                        ),
                       ),
-                      PopupMenuItem<String>(
+                      const PopupMenuItem<String>(
                         value: 'delete',
-                        child: Text('Delete Post'),
+                        child: Row(
+                          children: [
+                            Icon(Iconsax.trash, size: 16, color: Colors.red),
+                            SizedBox(width: 10),
+                            Text(
+                              'Delete Post',
+                              style: TextStyle(color: Colors.red),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -1918,7 +2265,9 @@ class FeedCardState extends State<FeedCard> {
             ),
           ),
 
-          // Media Section - Instagram Like
+          // Media Section - only when the post has images or attachments
+          if (widget.feed.mediaImages.isNotEmpty ||
+              widget.feed.attachments.isNotEmpty)
           _MediaSectionWrapper(
             fixedHeight: widget.fixedMediaHeight,
             child: InkWell(
@@ -2019,15 +2368,17 @@ class FeedCardState extends State<FeedCard> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if ((widget.feed.mediaImages.isNotEmpty ||
-                        widget.feed.attachments.isNotEmpty) &&
-                    widget.feed.content.isNotEmpty)
+                if (widget.feed.content.isNotEmpty)
                   Text(
                     widget.feed.content,
-                    maxLines: 2,
+                    maxLines: (widget.feed.mediaImages.isNotEmpty ||
+                            widget.feed.attachments.isNotEmpty)
+                        ? 2
+                        : 6,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: 12.5,
+                      height: 1.4,
                       color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
@@ -2079,7 +2430,18 @@ class FeedCardState extends State<FeedCard> {
                       ),
                     ),
                   ),
-                const SizedBox(height: 6),
+                if (widget.feed.poll != null) ...[
+                  const SizedBox(height: 8),
+                  _buildInlinePoll(theme),
+                ],
+                const SizedBox(height: 8),
+                Divider(
+                  height: 1,
+                  color: theme.colorScheme.outlineVariant.withValues(
+                    alpha: 0.6,
+                  ),
+                ),
+                const SizedBox(height: 4),
 
                 // Interaction Bar
                 Row(
@@ -2107,9 +2469,9 @@ class FeedCardState extends State<FeedCard> {
                           padding: const EdgeInsets.all(4),
                           child: Icon(
                             _isSaved
-                                ? Iconsax.archive_minus5
-                                : Iconsax.archive_add,
-                            size: 18,
+                                ? Icons.bookmark
+                                : Icons.bookmark_border,
+                            size: 20,
                             color: _isSaved
                                 ? FeedAppColors.primary
                                 : FeedAppColors.textSecondary,
@@ -2123,6 +2485,167 @@ class FeedCardState extends State<FeedCard> {
             ),
           ),
           const SizedBox(height: 4),
+        ],
+      ),
+    );
+  }
+
+  void _handleVote(String optionId) {
+    if (widget.currentUserUid == null || _isVoting) return;
+    final feedId = widget.feed.uid;
+    if (feedId == null) return;
+    setState(() => _isVoting = true);
+    context.read<FeedBloc>().add(VotePoll(feedId: feedId, optionId: optionId));
+    // The bloc re-fetches feeds after a vote; release the guard either way.
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _isVoting = false);
+    });
+  }
+
+  Widget _buildInlinePoll(ThemeData theme) {
+    final poll = widget.feed.poll!;
+    const Color pollAccent = Color(0xFFF59E0B);
+    final int totalVotes = poll.options.fold<int>(0, (sum, o) => sum + o.votes);
+    final int maxVotes = poll.options.fold<int>(
+      0,
+      (m, o) => o.votes > m ? o.votes : m,
+    );
+    final bool hasVoted =
+        widget.currentUserUid != null &&
+        poll.votedUserIds.contains(widget.currentUserUid);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: pollAccent.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.bar_chart_rounded, size: 14, color: pollAccent),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  poll.question,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...poll.options.map((option) {
+            final int pct = totalVotes == 0
+                ? 0
+                : ((option.votes / totalVotes) * 100).round();
+            final bool isLeading = maxVotes > 0 && option.votes == maxVotes;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: hasVoted || widget.currentUserUid == null
+                    ? null
+                    : () => _handleVote(option.optionId),
+                child: Container(
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(
+                    color: theme.brightness == Brightness.light
+                        ? Colors.white
+                        : theme.colorScheme.surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: theme.colorScheme.outlineVariant),
+                  ),
+                  child: Stack(
+                    children: [
+                      if (totalVotes > 0 && isLeading)
+                        Positioned.fill(
+                          child: FractionallySizedBox(
+                            alignment: Alignment.centerLeft,
+                            widthFactor: (pct / 100).clamp(0.0, 1.0),
+                            child: Container(
+                              color: pollAccent.withValues(alpha: 0.18),
+                            ),
+                          ),
+                        ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 7,
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                option.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: theme.colorScheme.onSurface,
+                                ),
+                              ),
+                            ),
+                            Text(
+                              '$pct%',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w700,
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }),
+          Row(
+            children: [
+              Text(
+                '$totalVotes ${totalVotes == 1 ? 'vote' : 'votes'}',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const Spacer(),
+              if (hasVoted)
+                const Text(
+                  '✓ Already Participated',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF059669),
+                  ),
+                )
+              else if (_isVoting)
+                const SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                Text(
+                  'Tap an option to vote',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+            ],
+          ),
         ],
       ),
     );
@@ -2267,18 +2790,74 @@ class FeedCardState extends State<FeedCard> {
     return '$bytes B';
   }
 
+  static const List<String> _months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+
   String _buildTimeLabel(FeedModel feed) {
-    final createdLabel = _formatShortTime(feed.createdAt);
+    final created = feed.createdAt.toLocal();
+    final createdLabel = '${_months[created.month - 1]} ${created.day}';
     final updatedAt = feed.updatedAt;
 
     if (updatedAt == null || updatedAt.isAtSameMomentAs(feed.createdAt)) {
-      return 'Posted $createdLabel ago';
+      return 'Posted $createdLabel';
     }
 
-    return 'Posted $createdLabel ago · Edited ${_formatShortTime(updatedAt)} ago';
+    return 'Posted $createdLabel · Edited ${_formatShortTime(updatedAt)} ago';
   }
 
   Future<void> _showCommentSheet() async {
+    final double screenWidth = MediaQuery.of(context).size.width;
+    if (!kIsMobile && screenWidth >= 700) {
+      await showGeneralDialog(
+        context: context,
+        barrierDismissible: true,
+        barrierLabel: 'Comments',
+        barrierColor: Colors.black54,
+        transitionDuration: const Duration(milliseconds: 250),
+        pageBuilder: (dialogContext, _, __) {
+          return Align(
+            alignment: Alignment.centerRight,
+            child: Material(
+              color: Theme.of(dialogContext).colorScheme.surface,
+              clipBehavior: Clip.antiAlias,
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(16),
+                bottomLeft: Radius.circular(16),
+              ),
+              child: SizedBox(
+                width: 480,
+                height: MediaQuery.of(dialogContext).size.height,
+                child: CommentSheet(
+                  feedId: widget.feed.uid!,
+                  currentUserUid: widget.currentUserUid,
+                  initialComments: widget.feed.comments ?? [],
+                  asSidePanel: true,
+                ),
+              ),
+            ),
+          );
+        },
+        transitionBuilder: (context, animation, _, child) {
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(1, 0),
+              end: Offset.zero,
+            ).animate(
+              CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+            ),
+            child: child,
+          );
+        },
+      );
+
+      if (mounted) {
+        widget.onRefresh();
+      }
+      return;
+    }
+
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
