@@ -4,7 +4,55 @@ import 'package:flutter/foundation.dart';
 import '/constants/constants.dart';
 import '/models/models.dart';
 
+/// Kind of calendar event shown in the "Event Type" dropdown / detail view.
+enum EventType { meeting, call, reminder, appointment, deadline, other }
+
+extension EventTypeX on EventType {
+  String get label {
+    switch (this) {
+      case EventType.meeting:
+        return 'Meeting';
+      case EventType.call:
+        return 'Call';
+      case EventType.reminder:
+        return 'Reminder';
+      case EventType.appointment:
+        return 'Appointment';
+      case EventType.deadline:
+        return 'Deadline';
+      case EventType.other:
+        return 'Other';
+    }
+  }
+
+  static EventType fromName(String? name) => EventType.values.firstWhere(
+    (e) => e.name == (name ?? '').trim().toLowerCase(),
+    orElse: () => EventType.meeting,
+  );
+}
+
+extension EventRepeatTypeX on EventRepeatType {
+  /// Label used by the "Repeat Schedule" dropdown.
+  String get scheduleLabel {
+    switch (this) {
+      case EventRepeatType.none:
+        return 'Does not repeat';
+      case EventRepeatType.daily:
+        return 'Daily';
+      case EventRepeatType.weekly:
+        return 'Weekly';
+      case EventRepeatType.monthly:
+        return 'Monthly';
+      case EventRepeatType.yearly:
+        return 'Yearly';
+    }
+  }
+}
+
 class EventModel {
+  /// Default accent colour (brand blue).
+  static const int defaultAccent = 0xFF4364F7;
+
   final String? uid;
   final String eventName;
   final DateTime eventDateTime;
@@ -16,6 +64,15 @@ class EventModel {
   final bool completed;
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  /// Meeting / call / reminder ... (shown on cards and in the detail view).
+  final EventType eventType;
+
+  /// ARGB colour value used to paint this event on the calendar.
+  final int accentColor;
+
+  /// All-day events have no specific start / end time.
+  final bool allDay;
 
   /// Status of the server-scheduled "Event Started" push notification.
   /// Set to [EventNotificationStatus.pending] on the client when the event
@@ -32,6 +89,9 @@ class EventModel {
     required this.eventAttendes,
     required this.createdBy,
     this.completed = false,
+    this.eventType = EventType.meeting,
+    this.accentColor = defaultAccent,
+    this.allDay = false,
     this.notificationStatus = EventNotificationStatus.pending,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -47,6 +107,10 @@ class EventModel {
     EventRepeatType? eventRepeatType,
     List<String>? eventAttendes,
     UserDataModel? createdBy,
+    bool? completed,
+    EventType? eventType,
+    int? accentColor,
+    bool? allDay,
     EventNotificationStatus? notificationStatus,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -60,6 +124,10 @@ class EventModel {
       eventRepeatType: eventRepeatType ?? this.eventRepeatType,
       eventAttendes: eventAttendes ?? this.eventAttendes,
       createdBy: createdBy ?? this.createdBy,
+      completed: completed ?? this.completed,
+      eventType: eventType ?? this.eventType,
+      accentColor: accentColor ?? this.accentColor,
+      allDay: allDay ?? this.allDay,
       notificationStatus: notificationStatus ?? this.notificationStatus,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -76,6 +144,9 @@ class EventModel {
       'eventAttendes': eventAttendes,
       'createdBy': createdBy.toMap(),
       'completed': completed,
+      'eventType': eventType.name,
+      'accentColor': accentColor,
+      'allDay': allDay,
       'notificationStatus': notificationStatus.name,
       'createdAt': createdAt.millisecondsSinceEpoch,
       'updatedAt': updatedAt.millisecondsSinceEpoch,
@@ -92,6 +163,9 @@ class EventModel {
       'eventAttendes': eventAttendes,
       'createdBy': createdBy.toMap(),
       'completed': completed,
+      'eventType': eventType.name,
+      'accentColor': accentColor,
+      'allDay': allDay,
       // Editing the event always puts the server-side notification back to
       // "pending" — the onEventWritten trigger re-evaluates and reschedules
       // it. We never let the client set it to sent/cancelled directly.
@@ -121,6 +195,11 @@ class EventModel {
       completed: map['completed'] != null && map['completed'] is bool
           ? map['completed'] as bool
           : false,
+      eventType: EventTypeX.fromName(map['eventType'] as String?),
+      accentColor: map['accentColor'] is int
+          ? map['accentColor'] as int
+          : defaultAccent,
+      allDay: map['allDay'] is bool ? map['allDay'] as bool : false,
       notificationStatus: map['notificationStatus'] != null
           ? EventNotificationStatus.values.byName(
               map['notificationStatus'] as String,
@@ -151,6 +230,9 @@ class EventModel {
         other.eventEndDateTime == eventEndDateTime &&
         other.eventDescription == eventDescription &&
         other.eventRepeatType == eventRepeatType &&
+        other.eventType == eventType &&
+        other.accentColor == accentColor &&
+        other.allDay == allDay &&
         listEquals(other.eventAttendes, eventAttendes) &&
         other.createdBy == createdBy &&
         other.createdAt == createdAt &&
@@ -165,6 +247,9 @@ class EventModel {
         eventEndDateTime.hashCode ^
         eventDescription.hashCode ^
         eventRepeatType.hashCode ^
+        eventType.hashCode ^
+        accentColor.hashCode ^
+        allDay.hashCode ^
         eventAttendes.hashCode ^
         createdBy.hashCode ^
         createdAt.hashCode ^

@@ -52,10 +52,60 @@ class _EventViewState extends State<EventView> {
     if (mounted) setState(() {});
   }
 
+  void _openEdit() {
+    Navigator.pop(context);
+    if (kIsDesktop) {
+      GeneralDialog.showRTLSheet(
+        context,
+        EventEdit(uid: widget.event.uid ?? ''),
+      );
+    } else {
+      Sheet.showSheet(context, widget: EventEdit(uid: widget.event.uid ?? ''));
+    }
+  }
+
+  Future<void> _deleteEvent() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => ConfirmDialog(
+        title: 'Delete Event',
+        content:
+            'Are you sure you want to delete "${widget.event.eventName}"? This action cannot be undone.',
+        successText: 'Delete',
+      ),
+    );
+    if (confirm != true || !mounted) return;
+
+    final rootNavigator = Navigator.of(context, rootNavigator: true);
+    final navigator = Navigator.of(context);
+    futureLoading(context);
+    try {
+      await EventService.deleteEvent(uid: widget.event.uid ?? '');
+      rootNavigator.pop(); // loading
+      if (navigator.canPop()) navigator.pop(true); // detail panel
+      if (!mounted) return;
+      FlushBar.show(context, 'Event deleted successfully', isSuccess: true);
+    } catch (e, st) {
+      await ErrorService.recordError(e, st);
+      debugPrint('${e.toString()}, ${st.toString()}');
+      rootNavigator.pop(); // loading
+      if (!mounted) return;
+      FlushBar.show(
+        context,
+        e.toString(),
+        isSuccess: false,
+        error: e,
+        stackTrace: st,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      bottomNavigationBar: _buildFooter(),
       body: Column(
         children: [
           Container(
@@ -75,25 +125,27 @@ class _EventViewState extends State<EventView> {
             ),
             child: Row(
               children: [
-                Material(
-                  color: AppColors.white.withValues(alpha: 0.18),
-                  shape: const CircleBorder(),
-                  child: InkWell(
-                    customBorder: const CircleBorder(),
-                    onTap: () {
-                      if (Navigator.canPop(context)) Navigator.pop(context);
-                    },
-                    child: const Padding(
-                      padding: EdgeInsets.all(9),
-                      child: Icon(
-                        Icons.arrow_back,
-                        color: AppColors.white,
-                        size: 18,
+                if (!kIsDesktop) ...[
+                  Material(
+                    color: AppColors.white.withValues(alpha: 0.18),
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: () {
+                        if (Navigator.canPop(context)) Navigator.pop(context);
+                      },
+                      child: const Padding(
+                        padding: EdgeInsets.all(9),
+                        child: Icon(
+                          Icons.arrow_back,
+                          color: AppColors.white,
+                          size: 18,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 14),
+                  const SizedBox(width: 14),
+                ],
                 Container(
                   padding: const EdgeInsets.all(11),
                   decoration: BoxDecoration(
@@ -136,20 +188,7 @@ class _EventViewState extends State<EventView> {
                     shape: const CircleBorder(),
                     child: InkWell(
                       customBorder: const CircleBorder(),
-                      onTap: () {
-                        Navigator.pop(context);
-                        if (kIsDesktop) {
-                          GeneralDialog.showRTLSheet(
-                            context,
-                            EventEdit(uid: widget.event.uid ?? ''),
-                          );
-                        } else {
-                          Sheet.showSheet(
-                            context,
-                            widget: EventEdit(uid: widget.event.uid ?? ''),
-                          );
-                        }
-                      },
+                      onTap: _openEdit,
                       child: const Padding(
                         padding: EdgeInsets.all(9),
                         child: Icon(
@@ -160,6 +199,19 @@ class _EventViewState extends State<EventView> {
                       ),
                     ),
                   ),
+                if (kIsDesktop) ...[
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: () {
+                      if (Navigator.canPop(context)) Navigator.pop(context);
+                    },
+                    icon: const Icon(
+                      Icons.close,
+                      color: AppColors.white,
+                      size: 20,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -197,22 +249,35 @@ class _EventViewState extends State<EventView> {
                       const SizedBox(height: 14),
                       _buildDetailCard(
                         context,
+                        'Event Type',
+                        widget.event.eventType.label,
+                        Iconsax.category,
+                        valueColor: Color(widget.event.accentColor),
+                        iconBgColor: Color(widget.event.accentColor),
+                      ),
+                      const SizedBox(height: 14),
+                      _buildDetailCard(
+                        context,
                         'Start Time',
-                        widget.event.eventDateTime.formatDateTime,
+                        widget.event.allDay
+                            ? '${widget.event.eventDateTime.formatDate} (All day)'
+                            : widget.event.eventDateTime.formatDateTime,
                         Iconsax.clock,
                       ),
                       const SizedBox(height: 14),
                       _buildDetailCard(
                         context,
                         'End Time',
-                        widget.event.eventEndDateTime.formatDateTime,
+                        widget.event.allDay
+                            ? '${widget.event.eventEndDateTime.formatDate} (All day)'
+                            : widget.event.eventEndDateTime.formatDateTime,
                         Iconsax.clock,
                       ),
                       const SizedBox(height: 14),
                       _buildDetailCard(
                         context,
                         'Repeat Type',
-                        widget.event.eventRepeatType.name.capitalizeFirst,
+                        widget.event.eventRepeatType.scheduleLabel,
                         Iconsax.repeat,
                       ),
                       const SizedBox(height: 14),
@@ -250,6 +315,93 @@ class _EventViewState extends State<EventView> {
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFooter() {
+    final cs = Theme.of(context).colorScheme;
+    final canDelete = _permissions?.canDelete ?? false;
+    final canEdit = _permissions?.canEdit ?? false;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 18),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        border: Border(
+          top: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.6)),
+        ),
+      ),
+      child: Row(
+        children: [
+          if (canDelete)
+            OutlinedButton.icon(
+              onPressed: _deleteEvent,
+              icon: const Icon(Iconsax.trash, size: 16),
+              label: const Text('Delete'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.danger,
+                side: const BorderSide(color: AppColors.danger),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+          const Spacer(),
+          OutlinedButton(
+            onPressed: () {
+              if (Navigator.canPop(context)) Navigator.pop(context);
+            },
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: const Text('Close'),
+          ),
+          if (canEdit) ...[
+            const SizedBox(width: 10),
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                gradient: const LinearGradient(colors: _brandGradient),
+              ),
+              child: Material(
+                color: Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: _openEdit,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Iconsax.edit, size: 16, color: Colors.white),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Edit Event',
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

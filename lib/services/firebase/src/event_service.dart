@@ -23,7 +23,29 @@ class EventService {
     'end_date_time': _fmt(e.eventEndDateTime),
     'repeat_type': e.eventRepeatType.name,
     'assignees': e.eventAttendes,
+    'event_type': e.eventType.name,
+    'color': _hex(e.accentColor),
+    'all_day': e.allDay ? 1 : 0,
   };
+
+  static String _hex(int c) =>
+      '#${(c & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
+
+  static int _parseColor(dynamic v) {
+    final s = Js.s(v).trim().replaceAll('#', '');
+    if (s.isEmpty) return EventModel.defaultAccent;
+    final n = int.tryParse(s.length == 6 ? 'FF$s' : s, radix: 16);
+    return n ?? EventModel.defaultAccent;
+  }
+
+  /// calendar.php row -> [EventModel] including event type / colour / all-day.
+  static EventModel _fromApi(Map<String, dynamic> m) {
+    return CrmMappers.event(m).copyWith(
+      eventType: EventTypeX.fromName(Js.s(m['event_type'])),
+      accentColor: _parseColor(m['color']),
+      allDay: Js.b(m['all_day']),
+    );
+  }
 
   static Future<EventModel> createEvent({required EventModel event, String? docId}) async {
     try {
@@ -47,7 +69,7 @@ class EventService {
   static Future<EventModel> getEvent({required String uid}) async {
     try {
       final res = (await CalendarApiService.call('get', {'uid': uid})).ensureSuccess();
-      return CrmMappers.event(res.dataMap);
+      return _fromApi(res.dataMap);
     } catch (e, st) {
       _fail(e, st);
     }
@@ -56,7 +78,7 @@ class EventService {
   static Future<List<EventModel>> getAllEvents() async {
     try {
       final res = (await CalendarApiService.call('list')).ensureSuccess();
-      return Js.mapList(res.dataMap['events']).map(CrmMappers.event).toList();
+      return Js.mapList(res.dataMap['events']).map(_fromApi).toList();
     } catch (e, st) {
       _fail(e, st);
     }
