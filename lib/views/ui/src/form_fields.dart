@@ -409,7 +409,7 @@ class _FormDropdownSearchState extends State<FormDropdownSearch> {
 
             // Dropdown
             CustomSearchableDropdown(
-              key: ValueKey('dropdown_${widget.items?.length}_${widget.items?.hashCode}'),
+              key: ValueKey('dropdown_${widget.items?.length}_${Object.hashAll(widget.items ?? const [])}'),
               initialValue: selectedValue,
               items: widget.items ?? [],
               itemAsString: (s) => s,

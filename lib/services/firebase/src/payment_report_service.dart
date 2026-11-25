@@ -7,12 +7,14 @@ class PaymentReportSource {
   final List<DealModel> deals; // completed deals only
   final List<ProjectUpdationModel> updations;
   final List<PaymentModel> payments;
+  final List<MasterCompanyModel> companies; // "Our Company" list
 
   const PaymentReportSource({
     required this.clients,
     required this.deals,
     required this.updations,
     required this.payments,
+    this.companies = const [],
   });
 }
 
@@ -26,6 +28,7 @@ class PaymentReportService {
       DealService.getAllDeals(),
       ProjectUpdationService.getAllUpdations(),
       PaymentService.getAll(),
+      MasterCompanyService.getAll(),
     ]);
     // Every deal (a lead converted to a deal) and every project updation is
     // reported from the moment it is created - a payment is not needed.
@@ -34,6 +37,7 @@ class PaymentReportService {
       deals: r[1] as List<DealModel>,
       updations: r[2] as List<ProjectUpdationModel>,
       payments: r[3] as List<PaymentModel>,
+      companies: r[4] as List<MasterCompanyModel>,
     );
   }
 
@@ -57,13 +61,23 @@ class PaymentReportService {
   /// * [from]/[to] limit which deals (by created date) and updations (by
   ///   requested date) are reported. Payments allocated to them are always
   ///   counted in full, so Pending/Completed stays truthful.
+  /// * [companyId] ("Our Company" filter) keeps only the payments received
+  ///   into that company. Only deals / updations that have a payment in that
+  ///   company are listed, and their Received Value is the amount that
+  ///   company received.
   /// * Payment lines without an updation count as payment allocated; lines
   ///   with an updation count as project update allocated.
   static List<PaymentReportRow> build(
     PaymentReportSource src, {
     DateTime? from,
     DateTime? to,
+    String? companyId,
   }) {
+    final filterByCompany = companyId != null && companyId.isNotEmpty;
+    final payments = filterByCompany
+        ? src.payments.where((p) => p.companyId == companyId).toList()
+        : src.payments;
+
     final clientById = {
       for (final c in src.clients)
         if (c.uid != null) c.uid!: c,
@@ -72,7 +86,7 @@ class PaymentReportService {
     // Received per deal (no updation) and per updation.
     final dealReceived = <String, double>{};
     final updationReceived = <String, double>{};
-    for (final p in src.payments) {
+    for (final p in payments) {
       final updId = p.updationId ?? '';
       if (updId.isEmpty) {
         dealReceived[p.projectId] =
@@ -111,6 +125,8 @@ class PaymentReportService {
 
     for (final d in src.deals) {
       if (d.uid == null || !_inRange(d.createdAt, from, to)) continue;
+      // Our Company filter: only deals that received a payment in it.
+      if (filterByCompany && !dealReceived.containsKey(d.uid)) continue;
       dealsByClient
           .putIfAbsent(keyFor(d), () => [])
           .add(
@@ -127,7 +143,7 @@ class PaymentReportService {
     // Payments whose deal record no longer exists: report them from the
     // snapshot saved on the payment so the money is never dropped.
     final orphanLines = <String, List<PaymentModel>>{};
-    for (final p in src.payments) {
+    for (final p in payments) {
       if ((p.updationId ?? '').isEmpty && !dealById.containsKey(p.projectId)) {
         orphanLines.putIfAbsent(p.projectId, () => []).add(p);
       }
@@ -163,6 +179,8 @@ class PaymentReportService {
       final deal = dealById[u.projectId];
       final value = u.value ?? 0;
       if (u.uid == null || !_inRange(u.requestedDate, from, to)) continue;
+      // Our Company filter: only updations that received a payment in it.
+      if (filterByCompany && !updationReceived.containsKey(u.uid)) continue;
       // Updations of a deleted deal are only reported when money was
       // already allocated to them.
       if (deal == null && !updationReceived.containsKey(u.uid)) continue;

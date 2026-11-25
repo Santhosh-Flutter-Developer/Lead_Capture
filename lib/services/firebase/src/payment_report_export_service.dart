@@ -22,7 +22,9 @@ class PaymentReportExportService {
     required String client,
     required String period,
     required String status,
-  }) => 'Client: $client   |   Period: $period   |   Status: $status';
+    String company = 'All Companies',
+  }) =>
+      'Client: $client   |   Our Company: $company   |   Period: $period   |   Status: $status';
 
   // ─────────────────────────────── PDF ───────────────────────────────
 

@@ -44,6 +44,7 @@ class _PaymentReportPageState extends State<PaymentReportPage> {
   int _baseCount = 0; // rows before the status / client filters
 
   String? _fClient; // master client uid
+  String? _fCompany; // our company (master company) uid
   PaymentReportPeriod _period = PaymentReportPeriod.allTime;
   DateTimeRange? _customRange;
   _StatusFilter _status = _StatusFilter.all;
@@ -156,6 +157,7 @@ class _PaymentReportPageState extends State<PaymentReportPage> {
       src,
       from: range?.from,
       to: range?.to,
+      companyId: _fCompany,
     );
     if (_fClient != null) {
       rows = rows.where((r) => r.clientId == _fClient).toList();
@@ -174,6 +176,7 @@ class _PaymentReportPageState extends State<PaymentReportPage> {
 
   void _resetFilters() {
     _fClient = null;
+    _fCompany = null;
     _period = PaymentReportPeriod.allTime;
     _customRange = null;
     _status = _StatusFilter.all;
@@ -183,6 +186,7 @@ class _PaymentReportPageState extends State<PaymentReportPage> {
 
   bool get _hasFilters =>
       _fClient != null ||
+      _fCompany != null ||
       _period != PaymentReportPeriod.allTime ||
       _status != _StatusFilter.all;
 
@@ -199,6 +203,12 @@ class _PaymentReportPageState extends State<PaymentReportPage> {
     if (_fClient == null) return 'All Clients';
     final c = _source?.clients.where((c) => c.uid == _fClient).firstOrNull;
     return c == null ? 'All Clients' : PaymentReportService.clientLabel(c);
+  }
+
+  String get _companyText {
+    if (_fCompany == null) return 'All Companies';
+    final c = _source?.companies.where((c) => c.uid == _fCompany).firstOrNull;
+    return c?.companyName ?? 'All Companies';
   }
 
   String get _statusText => switch (_status) {
@@ -243,6 +253,7 @@ class _PaymentReportPageState extends State<PaymentReportPage> {
     try {
       final filters = PaymentReportExportService.filterSummary(
         client: _clientText,
+        company: _companyText,
         period: _periodText,
         status: _statusText,
       );
@@ -496,6 +507,9 @@ class _PaymentReportPageState extends State<PaymentReportPage> {
     final clients = _source?.clients ?? const <ClientModel>[];
     final labels = clients.map(PaymentReportService.clientLabel).toSet().toList()
       ..sort();
+    final companies = _source?.companies ?? const <MasterCompanyModel>[];
+    final companyNames =
+        companies.map((c) => c.companyName).toSet().toList()..sort();
     final width = isWide ? 220.0 : double.infinity;
 
     final buttons = <Widget>[
@@ -594,6 +608,18 @@ class _PaymentReportPageState extends State<PaymentReportPage> {
                 (v) {
                   _fClient = clients
                       .where((c) => PaymentReportService.clientLabel(c) == v)
+                      .firstOrNull
+                      ?.uid;
+                  _recalculate();
+                },
+              ),
+              dd(
+                'Our Company',
+                _fCompany == null ? null : _companyText,
+                companyNames,
+                (v) {
+                  _fCompany = companies
+                      .where((c) => c.companyName == v)
                       .firstOrNull
                       ?.uid;
                   _recalculate();

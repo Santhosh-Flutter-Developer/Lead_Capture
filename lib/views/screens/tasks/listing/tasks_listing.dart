@@ -232,6 +232,10 @@ class _TaskListingViewState extends State<TaskListingView> {
         if (name.isNotEmpty) leads[lid] = name;
       }
     }
+    // Every project is selectable, even one that has no tasks yet.
+    _projectNames.forEach((pid, name) {
+      if (name.isNotEmpty) projects[pid] = name;
+    });
     // Like the Projects page: every Project Lead is selectable.
     for (final lid in _projectLeads.values) {
       if (lid.isEmpty) continue;

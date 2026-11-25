@@ -454,7 +454,11 @@ class _PaymentListingState extends State<PaymentListing> {
             // A project that belongs to another client no longer applies.
             if (_fProject != null &&
                 _fClient != null &&
-                _deals.where((d) => d.uid == _fProject).firstOrNull?.clientId !=
+                (_deals.where((d) => d.uid == _fProject).firstOrNull?.clientId ??
+                        _all
+                            .where((g) => g.projectId == _fProject)
+                            .firstOrNull
+                            ?.clientId) !=
                     _fClient) {
               _fProject = null;
             }
@@ -498,23 +502,45 @@ class _PaymentListingState extends State<PaymentListing> {
     );
   }
 
-  /// label -> deal uid for every completed deal (of the selected client
-  /// when one is chosen).
+  /// label -> deal uid (== payment.projectId) for the Projects filter.
+  ///
+  /// Sources, merged: (1) the projects of the payments already listed, so the
+  /// filter always matches the rows on screen even when deals.php scopes the
+  /// deal list down for this user, and (2) every deal returned by deals.php.
+  /// Narrowed to the selected Master Client when one is chosen.
   Map<String, String> _projectLabels() {
-    final deals = _deals.where(
-      (d) => d.uid != null && (_fClient == null || d.clientId == _fClient),
+    final byUid = <String, ({String name, int? number, String? clientId})>{};
+
+    // Deals first (they carry the deal number used to tell duplicates apart).
+    for (final d in _deals) {
+      final id = d.uid;
+      if (id == null || id.isEmpty) continue;
+      final name = (d.projectName ?? '').trim().isEmpty
+          ? d.dealName
+          : d.projectName!;
+      byUid[id] = (name: name.trim(), number: d.dealNumber, clientId: d.clientId);
+    }
+    // Then payments: fills in anything the deal list did not return.
+    for (final g in _all) {
+      if (g.projectId.isEmpty || byUid.containsKey(g.projectId)) continue;
+      byUid[g.projectId] =
+          (name: g.projectName.trim(), number: null, clientId: g.clientId);
+    }
+
+    final entries = byUid.entries.where(
+      (e) =>
+          e.value.name.isNotEmpty &&
+          (_fClient == null || e.value.clientId == _fClient),
     );
-    String nameOf(DealModel d) =>
-        (d.projectName ?? '').trim().isEmpty ? d.dealName : d.projectName!;
     final counts = <String, int>{};
-    for (final d in deals) {
-      counts[nameOf(d)] = (counts[nameOf(d)] ?? 0) + 1;
+    for (final e in entries) {
+      counts[e.value.name] = (counts[e.value.name] ?? 0) + 1;
     }
     return {
-      for (final d in deals)
-        counts[nameOf(d)]! > 1 && d.dealNumber != null
-            ? '${nameOf(d)} (#${d.dealNumber})'
-            : nameOf(d): d.uid!,
+      for (final e in entries)
+        counts[e.value.name]! > 1 && e.value.number != null
+            ? '${e.value.name} (#${e.value.number})'
+            : e.value.name: e.key,
     };
   }
 
