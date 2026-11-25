@@ -50,6 +50,13 @@ class _PaymentListingState extends State<PaymentListing> {
   String? _fClient; // master client uid
   String? _fProject; // deal uid
   String? _fMode;
+  String? _fCompany; // our company (master company) name
+  DateTime? _fFrom; // payment date range (inclusive)
+  DateTime? _fTo;
+  final _fromCtrl = TextEditingController();
+  final _toCtrl = TextEditingController();
+  List<MasterCompanyModel> _masterCompanies = []; // Our Company master
+  List<String> _companyNames = []; // names from the Our Company master only
   List<String> _modeNames = []; // every Payment Mode master item
   double? _fValue;
   String _search = '';
@@ -68,7 +75,7 @@ class _PaymentListingState extends State<PaymentListing> {
         final q = query.toLowerCase();
         return c.clientLabel.toLowerCase().contains(q) ||
             c.projectName.toLowerCase().contains(q) ||
-            c.companiesText.toLowerCase().contains(q) ||
+            _companiesText(c).toLowerCase().contains(q) ||
             c.modesText.toLowerCase().contains(q);
       },
       sortLogic: (a, b, col, asc) {
@@ -111,6 +118,8 @@ class _PaymentListingState extends State<PaymentListing> {
     _hScroll.dispose();
     _vScroll.dispose();
     _valueCtrl.dispose();
+    _fromCtrl.dispose();
+    _toCtrl.dispose();
     super.dispose();
   }
 
@@ -129,7 +138,15 @@ class _PaymentListingState extends State<PaymentListing> {
         ClientService.getMasterClients(),
         DealService.getAllDeals(),
         PaymentModeService.getAllPaymentMode(),
+        MasterCompanyService.getAll(),
       ]);
+      _masterCompanies = results[4] as List<MasterCompanyModel>;
+      _companyNames = _masterCompanies
+          .map((m) => m.companyName.trim())
+          .where((n) => n.isNotEmpty)
+          .toSet()
+          .toList()
+        ..sort();
       _modeNames = (results[3] as List<PaymentModeModel>)
           .map((m) => m.name.trim())
           .where((n) => n.isNotEmpty)
@@ -319,7 +336,7 @@ class _PaymentListingState extends State<PaymentListing> {
           label: const Text('Add Payment'),
         ),
       if ((_permissions?.canExport ?? false) &&
-          _filtered.isNotEmpty)
+          controller.filteredItems.isNotEmpty)
         OutlinedButton.icon(
           onPressed: () => _export(context, controller),
           icon: const Icon(Iconsax.export_3, size: 18),
@@ -391,11 +408,48 @@ class _PaymentListingState extends State<PaymentListing> {
   List<String> _distinct(Iterable<String> v) =>
       (v.where((e) => e.trim().isNotEmpty).toSet().toList()..sort());
 
+  /// Current Our Company name of one payment line. The name saved on the
+  /// payment is only a snapshot (it can be old / renamed), so the Our Company
+  /// master is the source of truth: matched by id first, then by name.
+  String _companyOf(PaymentModel l) {
+    final byId = _masterCompanies
+        .where((m) => (m.uid ?? '').isNotEmpty && m.uid == l.companyId)
+        .firstOrNull;
+    if (byId != null) return byId.companyName.trim();
+    final saved = l.companyName.trim();
+    final byName = _masterCompanies
+        .where((m) => m.companyName.trim().toLowerCase() == saved.toLowerCase())
+        .firstOrNull;
+    return (byName?.companyName ?? saved).trim();
+  }
+
+  List<String> _companiesOf(PaymentGroup g) =>
+      g.lines.map(_companyOf).where((n) => n.isNotEmpty).toSet().toList();
+
+  String _companiesText(PaymentGroup g) => _companiesOf(g).join(', ');
+
   void _applyFilters() {
     var list = _all.where((p) {
       if (_fClient != null && p.clientId != _fClient) return false;
       if (_fProject != null && p.projectId != _fProject) return false;
       if (_fMode != null && !p.modes.contains(_fMode)) return false;
+      if (_fCompany != null && !_companiesOf(p).contains(_fCompany)) {
+        return false;
+      }
+      if (_fFrom != null || _fTo != null) {
+        // Keep the project when any of its payment lines falls in the range.
+        final inRange = p.lines.any((l) {
+          final d = DateTime(
+            l.createdAt.year,
+            l.createdAt.month,
+            l.createdAt.day,
+          );
+          if (_fFrom != null && d.isBefore(_fFrom!)) return false;
+          if (_fTo != null && d.isAfter(_fTo!)) return false;
+          return true;
+        });
+        if (!inRange) return false;
+      }
       if (_fValue != null && (p.totalValue - _fValue!).abs() > 0.0001) {
         return false;
       }
@@ -411,14 +465,68 @@ class _PaymentListingState extends State<PaymentListing> {
     _fClient = null;
     _fProject = null;
     _fMode = null;
+    _fCompany = null;
+    _fFrom = null;
+    _fTo = null;
+    _fromCtrl.clear();
+    _toCtrl.clear();
     _fValue = null;
     _valueCtrl.clear();
     _filterTick++;
     _applyFilters();
   }
 
+  Future<void> _pickDate(BuildContext context, {required bool isFrom}) async {
+    final current = isFrom ? _fFrom : _fTo;
+    final v = await pickDate(
+      context,
+      initialDate: current,
+      // "To" cannot be before "From" and vice versa.
+      firstDate: isFrom ? null : _fFrom,
+      lastDate: isFrom ? _fTo : null,
+    );
+    if (v == null) return;
+    final picked = DateFormat('dd-MM-yyyy').parse(v);
+    if (isFrom) {
+      _fFrom = picked;
+      _fromCtrl.text = v;
+    } else {
+      _toCtrl.text = v;
+      _fTo = picked;
+    }
+    _applyFilters();
+  }
+
   Widget _filters(BuildContext context, bool isWide) {
     final width = isWide ? 220.0 : double.infinity;
+    Widget dateField(String label, TextEditingController c, bool isFrom) {
+      final has = (isFrom ? _fFrom : _fTo) != null;
+      return SizedBox(
+        width: width,
+        child: FormFields(
+          label: label,
+          controller: c,
+          hintText: 'dd-mm-yyyy',
+          readOnly: true,
+          onTap: () => _pickDate(context, isFrom: isFrom),
+          suffixIcon: has
+              ? InkWell(
+                  onTap: () {
+                    if (isFrom) {
+                      _fFrom = null;
+                    } else {
+                      _fTo = null;
+                    }
+                    c.clear();
+                    _applyFilters();
+                  },
+                  child: const Icon(Icons.close_rounded, size: 18),
+                )
+              : const Icon(Iconsax.calendar_1, size: 18),
+        ),
+      );
+    }
+
     Widget dd(String label, String? value, List<String> items,
         ValueChanged<String?> onChanged) {
       return SizedBox(
@@ -442,6 +550,14 @@ class _PaymentListingState extends State<PaymentListing> {
       runSpacing: 10,
       crossAxisAlignment: WrapCrossAlignment.end,
       children: [
+        dateField('From Date', _fromCtrl, true),
+        dateField('To Date', _toCtrl, false),
+        dd(
+          'Our Company',
+          _fCompany,
+          _companyNames,
+          (v) => _fCompany = v,
+        ),
         dd(
           'Master Clients',
           _clients.where((c) => c.uid == _fClient).map(masterClientLabel).firstOrNull,
@@ -654,7 +770,12 @@ class _PaymentListingState extends State<PaymentListing> {
         DataCell(Text(_money.format(c.totalValue), style: style)),
         DataCell(Text(_money.format(c.allocatedValue), style: style)),
         DataCell(Text(c.modesText.isNotEmpty ? c.modesText : '-', style: style)),
-        DataCell(Text(c.companiesText.isNotEmpty ? c.companiesText : '-', style: style)),
+        DataCell(
+          Text(
+            _companiesText(c).isNotEmpty ? _companiesText(c) : '-',
+            style: style,
+          ),
+        ),
         DataCell(CreatedByWidget(userData: c.createdBy)),
         DataCell(
           Row(
@@ -694,23 +815,26 @@ class _PaymentListingState extends State<PaymentListing> {
           'Our Company',
           'Payment Value',
           'Payment Mode',
+          'Payment Date',
           'Created By',
         ],
-        for (final c in _filtered)
+        for (final c in controller.filteredItems)
           [
             c.clientLabel,
             c.projectName,
             c.totalValue.toStringAsFixed(2),
-            c.companiesText,
+            _companiesText(c),
             c.allocatedValue.toStringAsFixed(2),
             c.modesText,
+            DateFormat('dd-MM-yyyy').format(c.createdAt),
             c.createdBy.name,
           ],
       ];
       final bytes = await XlsxWriter().create(rows);
       final path = await saveFileToDownloads(
         bytes,
-        fileName: 'Payment List.xlsx',
+        fileName:
+            'Payment List_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.xlsx',
       );
       if (!kIsWeb && context.mounted) openfile(path, context);
     } catch (e) {
