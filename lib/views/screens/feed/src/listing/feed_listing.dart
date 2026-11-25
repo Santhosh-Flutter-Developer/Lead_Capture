@@ -117,8 +117,23 @@ class _FeedListingState extends State<FeedListing> {
     setState(() {});
   }
 
-  void _refreshFeed() {
-    context.read<FeedBloc>().add(RefreshFeeds());
+  bool _isRefreshing = false;
+
+  /// Re-fetches feeds and completes when the bloc has emitted the result,
+  /// so the Refresh button / pull-to-refresh can show real progress.
+  Future<void> _refreshFeed() async {
+    if (_isRefreshing) return;
+    final bloc = context.read<FeedBloc>();
+    setState(() => _isRefreshing = true);
+    final done = bloc.stream.firstWhere(
+      (st) => st is FeedLoaded || st is FeedError,
+      orElse: () => FeedInitial(),
+    );
+    bloc.add(RefreshFeeds());
+    try {
+      await done.timeout(const Duration(seconds: 20));
+    } catch (_) {}
+    if (mounted) setState(() => _isRefreshing = false);
   }
 
   Future<void> _openCreate() async {
@@ -203,8 +218,17 @@ class _FeedListingState extends State<FeedListing> {
           ),
           const SizedBox(width: 12),
           OutlinedButton.icon(
-            onPressed: _refreshFeed,
-            icon: const Icon(Iconsax.refresh, size: 16, color: Colors.white),
+            onPressed: _isRefreshing ? null : _refreshFeed,
+            icon: _isRefreshing
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Iconsax.refresh, size: 16, color: Colors.white),
             label: const Text(
               'Refresh',
               style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
@@ -520,7 +544,7 @@ class _FeedListingState extends State<FeedListing> {
           final feeds = _applyTab(allFeeds);
 
           return RefreshIndicator(
-            onRefresh: () async => _refreshFeed(),
+            onRefresh: _refreshFeed,
             child: Scrollbar(
               controller: _scrollController,
               thumbVisibility: true,
@@ -590,6 +614,199 @@ class _MediaSectionWrapper extends StatelessWidget {
       return SizedBox(height: fixedHeight, child: child);
     }
     return Expanded(child: child);
+  }
+}
+
+/// Circle avatar that shows the profile image when there is one (and it
+/// loads); otherwise the first letter of the user's name on a colored circle.
+class _LetterAvatar extends StatelessWidget {
+  final String name;
+  final String imageUrl;
+  final double radius;
+
+  const _LetterAvatar({
+    required this.name,
+    required this.imageUrl,
+    this.radius = 18,
+  });
+
+  static const List<Color> _colors = [
+    Color(0xFF4364F7),
+    Color(0xFF10B981),
+    Color(0xFFF97316),
+    Color(0xFF8B5CF6),
+    Color(0xFFEC4899),
+    Color(0xFF06B6D4),
+    Color(0xFFEF4444),
+    Color(0xFFF59E0B),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final trimmed = name.trim();
+    final letter = trimmed.isEmpty ? '?' : trimmed.characters.first.toUpperCase();
+    final color = _colors[trimmed.codeUnits.fold<int>(0, (a, b) => a + b) %
+        _colors.length];
+
+    final Widget fallback = Container(
+      width: radius * 2,
+      height: radius * 2,
+      alignment: Alignment.center,
+      color: color,
+      child: Text(
+        letter,
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w800,
+          fontSize: radius * 0.95,
+        ),
+      ),
+    );
+
+    return ClipOval(
+      child: SizedBox(
+        width: radius * 2,
+        height: radius * 2,
+        child: imageUrl.trim().isEmpty
+            ? fallback
+            : Image.network(
+                imageUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => fallback,
+                loadingBuilder: (context, child, progress) =>
+                    progress == null ? child : fallback,
+              ),
+      ),
+    );
+  }
+}
+
+/// "Liked by" dialog: resolves each reacting user's name/avatar and lists them.
+class _LikesDialog extends StatefulWidget {
+  final List<String> userIds;
+  final String? currentUserUid;
+  final Future<_CommentAuthorDisplay?> Function(String uid) loadUser;
+
+  const _LikesDialog({
+    required this.userIds,
+    required this.currentUserUid,
+    required this.loadUser,
+  });
+
+  @override
+  State<_LikesDialog> createState() => _LikesDialogState();
+}
+
+class _LikesDialogState extends State<_LikesDialog> {
+  late final Future<Map<String, _CommentAuthorDisplay>> _future = _load();
+
+  Future<Map<String, _CommentAuthorDisplay>> _load() async {
+    final result = <String, _CommentAuthorDisplay>{};
+    for (final id in widget.userIds) {
+      try {
+        final d = await widget.loadUser(id);
+        if (d != null) result[id] = d;
+      } catch (_) {}
+    }
+    return result;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      clipBehavior: Clip.antiAlias,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 380, maxHeight: 460),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(18, 14, 10, 14),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF1D4ED8), Color(0xFF60A5FA)],
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.favorite, color: Colors.white, size: 18),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Liked by ${widget.userIds.length}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close, color: Colors.white, size: 20),
+                  ),
+                ],
+              ),
+            ),
+            Flexible(
+              child: FutureBuilder<Map<String, _CommentAuthorDisplay>>(
+                future: _future,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Padding(
+                      padding: EdgeInsets.all(32),
+                      child: Center(child: CircularProgressIndicator()),
+                    );
+                  }
+                  final users = snapshot.data ?? const {};
+                  return ListView.separated(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    itemCount: widget.userIds.length,
+                    separatorBuilder: (_, __) => Divider(
+                      height: 1,
+                      color: theme.colorScheme.outlineVariant.withValues(
+                        alpha: 0.5,
+                      ),
+                    ),
+                    itemBuilder: (context, index) {
+                      final uid = widget.userIds[index];
+                      final user = users[uid];
+                      final isMe = uid == widget.currentUserUid;
+                      final name = user?.name ?? 'Unknown user';
+                      final avatar = user?.avatar ?? '';
+                      return ListTile(
+                        dense: true,
+                        leading: _LetterAvatar(
+                          name: name,
+                          imageUrl: avatar,
+                          radius: 18,
+                        ),
+                        title: Text(
+                          isMe ? '$name (You)' : name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13.5,
+                          ),
+                        ),
+                        trailing: const Icon(
+                          Icons.favorite,
+                          color: Colors.red,
+                          size: 16,
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -1596,10 +1813,7 @@ class FeedCardState extends State<FeedCard> {
                                                                 BorderRadius.circular(
                                                                   12,
                                                                 ),
-                                                            onTap: () =>
-                                                                _openUserProfileFromComment(
-                                                                  comment.authorId,
-                                                                ),
+                                                            onTap: null,
                                                             child: CircleAvatar(
                                                               radius: 12,
                                                               backgroundColor:
@@ -1622,11 +1836,7 @@ class FeedCardState extends State<FeedCard> {
                                                                       .start,
                                                               children: [
                                                                 InkWell(
-                                                                  onTap: () =>
-                                                                      _openUserProfileFromComment(
-                                                                        comment
-                                                                            .authorId,
-                                                                      ),
+                                                                  onTap: null,
                                                                   child: Text(
                                                                     authorName,
                                                                     style: const TextStyle(
@@ -2065,6 +2275,16 @@ class FeedCardState extends State<FeedCard> {
   @override
   void didUpdateWidget(covariant FeedCard oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // Keep like/save state in sync with freshly fetched data (previously
+    // these were only read once in initState, so a refresh never updated
+    // another user's likes or saves on an existing card).
+    _isLiked = widget.feed.reactions.any(
+      (r) => r.userId == widget.currentUserUid,
+    );
+    _likeCount = widget.feed.reactions.length;
+    _isSaved =
+        widget.currentUserUid != null &&
+        widget.feed.savedBy.contains(widget.currentUserUid);
     if (_isVoting &&
         widget.currentUserUid != null &&
         (widget.feed.poll?.votedUserIds.contains(widget.currentUserUid) ??
@@ -2093,6 +2313,24 @@ class FeedCardState extends State<FeedCard> {
     });
     context.read<FeedBloc>().add(
       ToggleLike(feedId: widget.feed.uid!, userId: widget.currentUserUid!),
+    );
+  }
+
+  Future<void> _showLikesList() async {
+    final userIds = widget.feed.reactions
+        .map((r) => r.userId)
+        .where((id) => id.trim().isNotEmpty)
+        .toSet()
+        .toList();
+    if (userIds.isEmpty) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => _LikesDialog(
+        userIds: userIds,
+        currentUserUid: widget.currentUserUid,
+        loadUser: _loadCommentAuthorDisplay,
+      ),
     );
   }
 
@@ -2446,11 +2684,50 @@ class FeedCardState extends State<FeedCard> {
                 // Interaction Bar
                 Row(
                   children: [
-                    _interactionIcon(
-                      _isLiked ? Iconsax.heart5 : Iconsax.heart,
-                      _isLiked ? Colors.red : theme.colorScheme.onSurfaceVariant,
-                      _likeCount > 0 ? _likeCount.toString() : "",
-                      _handleLike,
+                    // Heart toggles the like; the count opens "Liked by".
+                    MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          InkWell(
+                            borderRadius: BorderRadius.circular(20),
+                            onTap: _handleLike,
+                            child: Padding(
+                              padding: const EdgeInsets.all(4),
+                              child: Icon(
+                                _isLiked ? Iconsax.heart5 : Iconsax.heart,
+                                size: 18,
+                                color: _isLiked
+                                    ? Colors.red
+                                    : theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                          if (_likeCount > 0)
+                            Tooltip(
+                              message: 'See who liked this',
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(8),
+                                onTap: _showLikesList,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 4,
+                                  ),
+                                  child: Text(
+                                    _likeCount.toString(),
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: theme.colorScheme.onSurface,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
                     const SizedBox(width: 14),
                     _interactionIcon(

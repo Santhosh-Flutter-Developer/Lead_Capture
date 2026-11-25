@@ -582,7 +582,7 @@ class CommentSheetState extends State<CommentSheet> {
       children: [
         InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: () => _openCommentAuthorProfile(comment.authorId),
+          onTap: null,
           child: CircleAvatar(
             radius: 16,
             backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
@@ -650,7 +650,7 @@ class CommentSheetState extends State<CommentSheet> {
                 Row(
                   children: [
                     InkWell(
-                      onTap: () => _openCommentAuthorProfile(comment.authorId),
+                      onTap: null,
                       child: Text(
                         authorName,
                         style: TextStyle(
