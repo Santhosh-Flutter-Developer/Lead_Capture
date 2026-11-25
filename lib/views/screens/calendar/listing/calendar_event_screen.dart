@@ -129,7 +129,11 @@ class _CalendarDisplayState extends State<CalendarDisplay> {
   DateTime _focusedMonth = DateTime.now();
   late DateTime _stripStart;
 
-  PermissionModel? _permissions;
+  PermissionModel? _permissions; // Calendar (events)
+  PermissionModel? _taskPerm;
+  PermissionModel? _leadPerm;
+  PermissionModel? _dealPerm;
+  PermissionModel? _ticketPerm;
 
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _vScrollController = ScrollController();
@@ -166,7 +170,18 @@ class _CalendarDisplayState extends State<CalendarDisplay> {
   }
 
   Future<void> _loadPermissions() async {
-    _permissions = await PermissionService.getPermissions('Calendar');
+    final r = await Future.wait([
+      PermissionService.getPermissions('Calendar'),
+      PermissionService.getPermissions('Tasks'),
+      PermissionService.getPermissions('Leads'),
+      PermissionService.getPermissions('Deals'),
+      PermissionService.getPermissions('Tickets'),
+    ]);
+    _permissions = r[0];
+    _taskPerm = r[1];
+    _leadPerm = r[2];
+    _dealPerm = r[3];
+    _ticketPerm = r[4];
     if (mounted) setState(() {});
   }
 
@@ -333,6 +348,124 @@ class _CalendarDisplayState extends State<CalendarDisplay> {
       _open(DealsViewPage(deal: e));
     } else if (e is CustomerTicketModel) {
       _open(TicketView(uid: e.uid ?? ''));
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Role based delete
+  // ---------------------------------------------------------------------
+
+  /// Delete access comes from the role's "Delete" permission of the page the
+  /// record belongs to (Calendar / Tasks / Leads / Deals / Tickets).
+  bool _canDelete(_CalItem item) {
+    switch (item.kind) {
+      case _CalFilter.events:
+        return _permissions?.canDelete ?? false;
+      case _CalFilter.tasks:
+        return _taskPerm?.canDelete ?? false;
+      case _CalFilter.leads:
+        return _leadPerm?.canDelete ?? false;
+      case _CalFilter.deals:
+        return _dealPerm?.canDelete ?? false;
+      case _CalFilter.tickets:
+        return _ticketPerm?.canDelete ?? false;
+      case _CalFilter.all:
+        return false;
+    }
+  }
+
+  /// Null when the current role may not delete [item] (button is hidden).
+  /// [dialogContext] closes the "Activities" dialog before deleting.
+  VoidCallback? _deleteCb(_CalItem item, {BuildContext? dialogContext}) {
+    if (!_canDelete(item)) return null;
+    return () {
+      if (dialogContext != null) Navigator.pop(dialogContext);
+      _deleteItem(item);
+    };
+  }
+
+  Future<void> _deleteItem(_CalItem item) async {
+    if (!_canDelete(item)) {
+      FlushBar.show(
+        context,
+        'You do not have permission to delete this item',
+        isSuccess: false,
+      );
+      return;
+    }
+    final src = item.source;
+    try {
+      if (src is EventModel) {
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (_) => ConfirmDialog(
+            title: 'Delete Event',
+            content:
+                'Are you sure you want to delete "${src.eventName}"? This action cannot be undone.',
+            successText: 'Delete',
+          ),
+        );
+        if (ok != true || !mounted) return;
+        await EventService.deleteEvent(uid: src.uid ?? '');
+        if (!mounted) return;
+        FlushBar.show(context, 'Event deleted successfully', isSuccess: true);
+      } else if (src is TaskModel) {
+        // "Delete" = cancel with remarks (not possible once status changed).
+        if (src.isCancelled) {
+          FlushBar.show(context, 'This task is already cancelled.', isSuccess: false);
+          return;
+        }
+        if (!src.canCancel) {
+          FlushBar.show(
+            context,
+            "Status has already been changed – this task can't be cancelled.",
+            isSuccess: false,
+          );
+          return;
+        }
+        final remarks = await showCancelRemarksDialog(context, entity: 'task');
+        if (remarks == null || !mounted) return;
+        await TaskService.cancelTask(uid: src.uid ?? '', remarks: remarks);
+        if (!mounted) return;
+        FlushBar.show(context, 'Tasks cancelled successfully');
+      } else if (src is CustomerTicketModel) {
+        if (src.isCancelled) {
+          FlushBar.show(context, 'This ticket is already cancelled.', isSuccess: false);
+          return;
+        }
+        if (!src.canCancel) {
+          FlushBar.show(
+            context,
+            "Status has already been changed – this ticket can't be cancelled.",
+            isSuccess: false,
+          );
+          return;
+        }
+        final remarks = await showCancelRemarksDialog(context, entity: 'ticket');
+        if (remarks == null || !mounted) return;
+        await TicketService.cancelTicket(uid: src.uid ?? '', remarks: remarks);
+        if (!mounted) return;
+        FlushBar.show(context, 'Tickets cancelled successfully');
+      } else if (src is LeadModel) {
+        final deleted = await confirmAndDeleteLead(context, src);
+        if (!deleted || !mounted) return;
+        showLeadDeletedUndo(context, src, () => _refresh());
+      } else if (src is DealModel) {
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (_) => const ConfirmDialog(
+            title: 'Delete Deal',
+            content: 'Are you sure you want to delete this deal?',
+          ),
+        );
+        if (ok != true || !mounted) return;
+        await DealService.deleteDeal(uid: src.uid ?? '');
+        if (!mounted) return;
+        FlushBar.show(context, 'Deal deleted successfully', isSuccess: true);
+      }
+    } catch (e, st) {
+      await ErrorService.recordError(e, st);
+      if (mounted) FlushBar.show(context, e.toString(), isSuccess: false);
     }
   }
 
@@ -903,7 +1036,12 @@ class _CalendarDisplayState extends State<CalendarDisplay> {
           ),
         ),
         for (final r in results)
-          _itemCard(r, showDate: true, onTap: () => _onItemTap(r)),
+          _itemCard(
+            r,
+            showDate: true,
+            onTap: () => _onItemTap(r),
+            onDelete: _deleteCb(r),
+          ),
       ],
     );
   }
@@ -1123,6 +1261,7 @@ class _CalendarDisplayState extends State<CalendarDisplay> {
     required VoidCallback onTap,
     bool showDate = false,
     double gap = 12,
+    VoidCallback? onDelete,
   }) {
     final p = _p;
     final muted = TextStyle(fontSize: 13.5, color: p.muted);
@@ -1240,6 +1379,30 @@ class _CalendarDisplayState extends State<CalendarDisplay> {
                     ),
                   ),
                   const SizedBox(width: 8),
+                  if (onDelete != null) ...[
+                    Tooltip(
+                      message: 'Delete',
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(10),
+                        onTap: onDelete,
+                        child: Container(
+                          width: 34,
+                          height: 34,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: AppColors.danger.withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(
+                            Iconsax.trash,
+                            size: 17,
+                            color: AppColors.danger,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
                   Icon(Icons.chevron_right, color: p.muted),
                 ],
               ),
@@ -1365,7 +1528,12 @@ class _CalendarDisplayState extends State<CalendarDisplay> {
                   : 'Nothing recorded under this filter for this date.',
             )
           else
-            for (final i in items) _itemCard(i, onTap: () => _onItemTap(i)),
+            for (final i in items)
+              _itemCard(
+                i,
+                onTap: () => _onItemTap(i),
+                onDelete: _deleteCb(i),
+              ),
         ],
       ),
     );
@@ -1587,7 +1755,11 @@ class _CalendarDisplayState extends State<CalendarDisplay> {
                         for (final i in items.take(8))
                           ConstrainedBox(
                             constraints: const BoxConstraints(maxWidth: 240),
-                            child: _smallChip(i.title, i.color),
+                            child: _smallChip(
+                              i.title,
+                              i.color,
+                              onDelete: _deleteCb(i),
+                            ),
                           ),
                         if (items.length > 8)
                           _smallChip('+${items.length - 8} more', p.muted),
@@ -1603,7 +1775,7 @@ class _CalendarDisplayState extends State<CalendarDisplay> {
     );
   }
 
-  Widget _smallChip(String text, Color color) {
+  Widget _smallChip(String text, Color color, {VoidCallback? onDelete}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
       decoration: BoxDecoration(
@@ -1611,11 +1783,37 @@ class _CalendarDisplayState extends State<CalendarDisplay> {
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: color.withValues(alpha: 0.28)),
       ),
-      child: Text(
-        text,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
+          ),
+          if (onDelete != null) ...[
+            const SizedBox(width: 6),
+            Tooltip(
+              message: 'Delete',
+              child: InkWell(
+                borderRadius: BorderRadius.circular(4),
+                onTap: onDelete,
+                child: const Icon(
+                  Iconsax.trash,
+                  size: 13,
+                  color: AppColors.danger,
+                ),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -2072,6 +2270,10 @@ class _CalendarDisplayState extends State<CalendarDisplay> {
                                   _itemCard(
                                     i,
                                     gap: 20,
+                                    onDelete: _deleteCb(
+                                      i,
+                                      dialogContext: dialogContext,
+                                    ),
                                     onTap: () {
                                       Navigator.pop(dialogContext);
                                       _onItemTap(i);
