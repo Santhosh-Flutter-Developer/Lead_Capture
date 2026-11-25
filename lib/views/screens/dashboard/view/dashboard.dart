@@ -68,7 +68,9 @@ class Dashboard extends StatefulWidget {
 
 class _DashboardState extends State<Dashboard>
     with SingleTickerProviderStateMixin {
-  String _selectedFilter = "Today";
+  // Must match the first load sent by the main screens (all records), so the
+  // dropdown label always describes the numbers that are on screen.
+  String _selectedFilter = "All";
   final Map<String, PermissionModel?> _permissions = {};
   bool _permissionsLoaded = false;
 
