@@ -220,15 +220,8 @@ class _AdminCreateState extends State<AdminCreate> {
               ),
             ),
 
-            valid: (value) {
-              if (value == null || value.isEmpty) {
-                return "Password is required";
-              }
-              if (value.length < 6) {
-                return "Password must be at least 6 characters";
-              }
-              return null;
-            },
+            valid: (value) =>
+                Validation.passwordValidation(input: value, isReq: true),
           ),
         ),
         SizedBox(

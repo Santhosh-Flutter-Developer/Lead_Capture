@@ -64,30 +64,39 @@ class Validation {
     return null;
   }
 
+  /// Single source of truth for password rules. Use this everywhere a
+  /// password is set (create, edit, reset, profile, bulk upload ...).
+  static const String passwordRulesHint =
+      'Min 8 characters with uppercase, lowercase, number & special character';
+
   static String? passwordValidation({
     required String? input,
     required bool isReq,
   }) {
-    if (input != null) {
-      if (input.length < 8) {
-        return "Must be at least 8 characters long";
-      }
+    final value = input ?? '';
 
-      if (!RegExp(r'[A-Z]').hasMatch(input)) {
-        return "Must contain at least one uppercase letter";
-      }
+    if (value.isEmpty) {
+      return isReq ? "Password is required" : null;
+    }
 
-      if (!RegExp(r'[a-z]').hasMatch(input)) {
-        return "Must contain at least one lowercase letter";
-      }
+    if (value.length < 8) {
+      return "Must be at least 8 characters long";
+    }
 
-      if (!RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(input)) {
-        return "Must contain at least one special character";
-      }
+    if (!RegExp(r'[A-Z]').hasMatch(value)) {
+      return "Must contain at least one uppercase letter";
+    }
 
-      if (!RegExp(r'\d').hasMatch(input)) {
-        return "Must contain at least one number";
-      }
+    if (!RegExp(r'[a-z]').hasMatch(value)) {
+      return "Must contain at least one lowercase letter";
+    }
+
+    if (!RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(value)) {
+      return "Must contain at least one special character";
+    }
+
+    if (!RegExp(r'\d').hasMatch(value)) {
+      return "Must contain at least one number";
     }
 
     return null;

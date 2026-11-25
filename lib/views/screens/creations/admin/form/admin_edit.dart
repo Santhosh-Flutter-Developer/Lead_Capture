@@ -420,13 +420,9 @@ class _AdminUpdateState extends State<AdminUpdate> {
             prefixIcon: const Icon(Iconsax.lock, size: 18),
             // Optional on update: only validate when a new password is typed.
             valid: (value) {
-              if (value == null || value.isEmpty) {
-                return null;
-              }
-              if (value.length < 6) {
-                return "Password must be at least 6 characters";
-              }
-              return null;
+              // Unchanged (prefilled) password -> nothing to validate.
+              if (value == widget.admin.password) return null;
+              return Validation.passwordValidation(input: value, isReq: false);
             },
             suffixIcon: IconButton(
               padding: EdgeInsets.zero,

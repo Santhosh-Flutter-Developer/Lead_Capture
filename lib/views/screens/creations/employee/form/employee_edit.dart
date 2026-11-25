@@ -38,6 +38,7 @@ class _EmployeeEditState extends State<EmployeeEdit> {
   final TextEditingController _aboutController = TextEditingController();
   final TextEditingController _skillsController = TextEditingController();
   bool _passwordVisible = false;
+  String _originalPassword = '';
 
   List<RoleModel> _rolesList = [];
   List<DesignationModel> _designationList = [];
@@ -107,6 +108,7 @@ class _EmployeeEditState extends State<EmployeeEdit> {
         _nameController.text = widget.admin!.name;
         _emailController.text = widget.admin!.email;
         _passwordController.text = widget.admin!.password;
+        _originalPassword = widget.admin!.password;
         _mobileNumberController.text = widget.admin!.mobileNumber;
         _selectedDateOfBirth = widget.admin!.createdAt;
         _profileImageUrl = widget.admin!.profileImageUrl;
@@ -138,6 +140,7 @@ class _EmployeeEditState extends State<EmployeeEdit> {
         _nameController.text = employee!.name;
         _emailController.text = employee!.email;
         _passwordController.text = employee!.password;
+        _originalPassword = employee!.password;
         _mobileNumberController.text = employee!.mobileNumber;
         _dateOfJoiningController.text = employee!.dateOfJoining.formatDate;
         _selectedDateOfJoining = employee!.dateOfJoining;
@@ -1097,9 +1100,11 @@ _scrollController.dispose();
             isRequired: false,
             prefixIcon: const Icon(Iconsax.lock, size: 18),
             // Optional on update: only validate when a new password is typed.
-            valid: (input) => (input == null || input.isEmpty)
-                ? null
-                : Validation.passwordValidation(input: input, isReq: false),
+            valid: (input) {
+              // Unchanged (prefilled) password -> nothing to validate.
+              if (input == _originalPassword) return null;
+              return Validation.passwordValidation(input: input, isReq: false);
+            },
             obsecureText: !_passwordVisible,
             suffixIcon: IconButton(
               onPressed: () => setState(() {

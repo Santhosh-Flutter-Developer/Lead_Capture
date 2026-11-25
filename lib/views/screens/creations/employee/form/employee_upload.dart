@@ -692,6 +692,15 @@ class _EmployeeUploadPageState extends State<EmployeeUploadPage> {
             continue;
           }
 
+          final passwordError = Validation.passwordValidation(
+            input: row[3].trim(),
+            isReq: true,
+          );
+          if (passwordError != null) {
+            recordSkip('Invalid password: $passwordError');
+            continue;
+          }
+
           final rowKeys = EmployeeService.duplicateKeysFor(
             employeeId: row[0],
             email: row[2],

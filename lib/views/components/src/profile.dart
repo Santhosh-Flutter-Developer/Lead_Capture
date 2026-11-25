@@ -143,16 +143,12 @@ class _ProfileState extends State<Profile> {
   Future<void> _savePassword() async {
     if (_savingPassword) return;
     final newPassword = _passwordController.text;
-    if (newPassword.isEmpty) {
-      FlushBar.show(context, 'Password is required', isSuccess: false);
-      return;
-    }
-    if (newPassword.length < 8) {
-      FlushBar.show(
-        context,
-        'Password must be at least 8 characters',
-        isSuccess: false,
-      );
+    final passwordError = Validation.passwordValidation(
+      input: newPassword,
+      isReq: true,
+    );
+    if (passwordError != null) {
+      FlushBar.show(context, passwordError, isSuccess: false);
       return;
     }
 
@@ -934,7 +930,9 @@ class _ProfileState extends State<Profile> {
                     decoration: InputDecoration(
                       isDense: true,
                       border: const UnderlineInputBorder(),
-                      hintText: 'Enter new password (min 8 characters)',
+                      hintText: 'Enter new password',
+                      helperText: Validation.passwordRulesHint,
+                      helperMaxLines: 2,
                       suffixIcon: IconButton(
                         iconSize: 18,
                         icon: Icon(
