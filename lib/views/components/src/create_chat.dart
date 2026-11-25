@@ -597,24 +597,14 @@ class _CreateChatState extends State<CreateChat>
                                     title: "Add Members",
                                     subtitle:
                                         "Pick who should be part of this group",
-                                    child: FormMultiDropdowns(
-                                      isRequired: true,
-                                      items: _members
-                                          .map<Object>((e) => e.name)
-                                          .toList(),
-                                      onListChanged: (selectedList) {
+                                    child: _MemberPicker(
+                                      members: _members,
+                                      selected: _selectedMembers,
+                                      onChanged: (list) {
                                         setState(() {
-                                          _selectedMembers.clear();
-                                          _selectedMembers.addAll(
-                                            _members
-                                                .where(
-                                                  (m) =>
-                                                      selectedList.contains(
-                                                        m.name,
-                                                      ),
-                                                )
-                                                .toList(),
-                                          );
+                                          _selectedMembers
+                                            ..clear()
+                                            ..addAll(list);
                                         });
                                       },
                                     ),
@@ -713,6 +703,321 @@ class _CreateChatState extends State<CreateChat>
                     );
                   }
                 },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Inline member picker for group creation: search box, tri-state
+/// "Select All" (applies to the members currently visible after searching),
+/// a "N selected" counter and a scrollable checkbox list.
+class _MemberPicker extends StatefulWidget {
+  final List<dynamic> members;
+  final List<dynamic> selected;
+  final ValueChanged<List<dynamic>> onChanged;
+
+  const _MemberPicker({
+    required this.members,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  @override
+  State<_MemberPicker> createState() => _MemberPickerState();
+}
+
+class _MemberPickerState extends State<_MemberPicker> {
+  final TextEditingController _search = TextEditingController();
+  final ScrollController _scroll = ScrollController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _search.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  String _idOf(dynamic m) {
+    try {
+      final id = (m.uid ?? m.id ?? '').toString();
+      if (id.isNotEmpty) return id;
+    } catch (_) {}
+    return (m.name ?? '').toString();
+  }
+
+  String _subtitleOf(dynamic m) {
+    if (m is AdminModel) return 'Super Admin';
+    try {
+      return CacheService.designationByUid(m.designation)?.name ?? 'Employee';
+    } catch (_) {
+      return 'Employee';
+    }
+  }
+
+  Set<String> get _selectedIds => widget.selected.map(_idOf).toSet();
+
+  List<dynamic> get _visible {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return widget.members;
+    return widget.members.where((m) {
+      final name = (m.name ?? '').toString().toLowerCase();
+      return name.contains(q) || _subtitleOf(m).toLowerCase().contains(q);
+    }).toList();
+  }
+
+  void _toggle(dynamic member) {
+    final id = _idOf(member);
+    final next = List<dynamic>.from(widget.selected);
+    if (_selectedIds.contains(id)) {
+      next.removeWhere((m) => _idOf(m) == id);
+    } else {
+      next.add(member);
+    }
+    widget.onChanged(next);
+  }
+
+  void _toggleAllVisible() {
+    final visible = _visible;
+    if (visible.isEmpty) return;
+    final ids = _selectedIds;
+    final allSelected = visible.every((m) => ids.contains(_idOf(m)));
+    final next = List<dynamic>.from(widget.selected);
+    if (allSelected) {
+      final visibleIds = visible.map(_idOf).toSet();
+      next.removeWhere((m) => visibleIds.contains(_idOf(m)));
+    } else {
+      for (final m in visible) {
+        if (!ids.contains(_idOf(m))) next.add(m);
+      }
+    }
+    widget.onChanged(next);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final visible = _visible;
+    final ids = _selectedIds;
+    final selectedVisible = visible.where((m) => ids.contains(_idOf(m))).length;
+    final bool? allValue = visible.isEmpty || selectedVisible == 0
+        ? false
+        : (selectedVisible == visible.length ? true : null);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _search,
+                onChanged: (v) => setState(() => _query = v),
+                style: theme.textTheme.bodyMedium,
+                decoration: InputDecoration(
+                  hintText: 'Search members...',
+                  prefixIcon: const Icon(Iconsax.search_normal_1, size: 18),
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: theme.colorScheme.outlineVariant,
+                    ),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: theme.colorScheme.outlineVariant,
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: AppColors.primary),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            InkWell(
+              onTap: _toggleAllVisible,
+              borderRadius: BorderRadius.circular(6),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: Checkbox(
+                      value: allValue,
+                      tristate: true,
+                      activeColor: AppColors.primary,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                      onChanged: (_) => _toggleAllVisible(),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Select All',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                '${widget.selected.length} selected',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Container(
+          height: 230,
+          decoration: BoxDecoration(
+            border: Border.all(color: theme.colorScheme.outlineVariant),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: visible.isEmpty
+              ? Center(
+                  child: Text(
+                    'No members found',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                )
+              : Scrollbar(
+                  controller: _scroll,
+                  thumbVisibility: true,
+                  child: ListView.builder(
+                    controller: _scroll,
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    itemCount: visible.length,
+                    itemBuilder: (context, i) {
+                      final m = visible[i];
+                      final isSelected = ids.contains(_idOf(m));
+                      return _memberRow(context, m, isSelected);
+                    },
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _memberRow(BuildContext context, dynamic m, bool isSelected) {
+    final theme = Theme.of(context);
+    final name = (m.name ?? '').toString().trim();
+    final letter = name.isNotEmpty ? name[0].toUpperCase() : '?';
+    final color = LetterColors.getColor(letter);
+    final String? image = m.profileImageUrl;
+
+    return InkWell(
+      onTap: () => _toggle(m),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppColors.primary.withValues(alpha: 0.08)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: Checkbox(
+                value: isSelected,
+                activeColor: AppColors.primary,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+                onChanged: (_) => _toggle(m),
+              ),
+            ),
+            const SizedBox(width: 10),
+            // Initial letter is always drawn underneath; the photo sits on
+            // top and only covers it once it has loaded. If the image fails
+            // (CORS, 404, network...) the letter simply stays visible.
+            SizedBox(
+              width: 34,
+              height: 34,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: color.withValues(alpha: 0.15),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      letter,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: color,
+                      ),
+                    ),
+                  ),
+                  if (image != null && image.isNotEmpty)
+                    ClipOval(
+                      child: Image.network(
+                        image,
+                        width: 34,
+                        height: 34,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) =>
+                            const SizedBox.shrink(),
+                        frameBuilder: (context, child, frame, sync) {
+                          if (frame == null) return const SizedBox.shrink();
+                          return child;
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: name,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    TextSpan(
+                      text: ' (${_subtitleOf(m)})',
+                      style: TextStyle(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ],
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium,
               ),
             ),
           ],

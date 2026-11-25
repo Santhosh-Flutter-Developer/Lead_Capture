@@ -1508,15 +1508,65 @@ class _HoverIcon extends StatelessWidget {
 class _ChatBubbleSenderAvatar extends StatelessWidget {
   final String senderId;
   const _ChatBubbleSenderAvatar({required this.senderId});
+
+  static const double _size = 28;
+
   @override
   Widget build(BuildContext context) {
-    return CircleAvatar(
-      radius: 12,
-      backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-      child: Icon(
-        Icons.person,
-        size: 14,
-        color: Theme.of(context).colorScheme.outline,
+    final scheme = Theme.of(context).colorScheme;
+
+    String name = '';
+    String? image;
+    try {
+      final user = CacheService.getUserByUid(senderId);
+      name = (user?.name ?? '').toString().trim();
+      image = user?.profileImageUrl as String?;
+    } catch (_) {}
+
+    // Unknown sender -> neutral person icon; otherwise the name's first letter.
+    final Widget fallback = name.isEmpty
+        ? Icon(Icons.person, size: 16, color: scheme.outline)
+        : Text(
+            name[0].toUpperCase(),
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: LetterColors.getColor(name[0]),
+            ),
+          );
+    final Color bg = name.isEmpty
+        ? scheme.surfaceContainerHighest
+        : LetterColors.getColor(name[0]).withValues(alpha: 0.15);
+
+    // Letter is always drawn underneath; the photo covers it only once it has
+    // loaded. If the image fails (CORS, 404, network...) the letter stays.
+    return SizedBox(
+      width: _size,
+      height: _size,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Container(
+            decoration: BoxDecoration(shape: BoxShape.circle, color: bg),
+            alignment: Alignment.center,
+            child: fallback,
+          ),
+          if (image != null && image.isNotEmpty)
+            ClipOval(
+              child: Image.network(
+                image,
+                width: _size,
+                height: _size,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) =>
+                    const SizedBox.shrink(),
+                frameBuilder: (context, child, frame, sync) {
+                  if (frame == null) return const SizedBox.shrink();
+                  return child;
+                },
+              ),
+            ),
+        ],
       ),
     );
   }

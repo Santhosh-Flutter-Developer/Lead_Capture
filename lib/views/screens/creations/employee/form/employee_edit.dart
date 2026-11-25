@@ -1548,7 +1548,7 @@ _scrollController.dispose();
         SizedBox(
           width: itemWidth,
           child: FormDropdownSearch(
-            items: const ['Single', 'Married'],
+            items: const ['Single', 'Married', 'Divorced', 'Widowed'],
             initialItem: _maritalStatus,
             label: 'Marital Status',
             onChanged: (value) {

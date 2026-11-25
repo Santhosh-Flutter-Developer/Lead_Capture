@@ -220,6 +220,15 @@ class _FormMultiDropdownsState extends State<FormMultiDropdowns> {
     widget.onListChanged?.call(const []);
   }
 
+  void _selectAll() {
+    final all = List<Object>.from(widget.items ?? const <Object>[]);
+    if (all.isEmpty) return;
+    // ValueNotifier setter updates the dropdown UI; the callback keeps the
+    // parent's selected list in sync (same pattern as _clearSelection).
+    _controller.value = all;
+    widget.onListChanged?.call(all);
+  }
+
   @override
   Widget build(BuildContext context) {
     CustomDropdown field;
@@ -246,6 +255,33 @@ class _FormMultiDropdownsState extends State<FormMultiDropdowns> {
       ),
       onListChanged: widget.onListChanged,
     );
+
+    final Widget actions = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          GestureDetector(
+            onTap: _selectAll,
+            child: Text(
+              'Select All',
+              style: Theme.of(context).textTheme.bodySmall!.copyWith(
+                color: AppColors.primary,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          GestureDetector(
+            onTap: _clearSelection,
+            child: Text(
+              'Clear',
+              style: Theme.of(context).textTheme.bodySmall!.copyWith(
+                color: AppColors.primary,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      );
 
     if (widget.label != null) {
       return Column(
@@ -275,16 +311,7 @@ class _FormMultiDropdownsState extends State<FormMultiDropdowns> {
                   ],
                 ],
               ),
-              GestureDetector(
-                onTap: _clearSelection,
-                child: Text(
-                  'Clear',
-                  style: Theme.of(context).textTheme.bodySmall!.copyWith(
-                    color: AppColors.primary,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
+              actions,
             ],
           ),
           const SizedBox(height: 8),
@@ -293,7 +320,15 @@ class _FormMultiDropdownsState extends State<FormMultiDropdowns> {
       );
     }
 
-    return field;
+    // No label: still offer Select All / Clear, right-aligned above the field.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Align(alignment: Alignment.centerRight, child: actions),
+        const SizedBox(height: 8),
+        field,
+      ],
+    );
   }
 }
 

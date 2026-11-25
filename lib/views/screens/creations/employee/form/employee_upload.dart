@@ -768,6 +768,10 @@ class _EmployeeUploadPageState extends State<EmployeeUploadPage> {
           var maritalStatus = 'Single';
           if (maritalStatusValue == 'married') {
             maritalStatus = 'Married';
+          } else if (maritalStatusValue == 'divorced') {
+            maritalStatus = 'Divorced';
+          } else if (maritalStatusValue == 'widowed') {
+            maritalStatus = 'Widowed';
           }
 
           final employeeTypeValue = row[18].trim().toLowerCase();

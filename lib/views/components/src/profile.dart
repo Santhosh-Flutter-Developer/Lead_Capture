@@ -26,6 +26,10 @@ class _ProfileState extends State<Profile> {
   AdminModel? admin;
   bool isAdmin = false;
   bool isLoading = true;
+
+  /// Role-based edit permission. Employees take it from the "Employees"
+  /// page permission of their role; admins can always edit.
+  bool _canEdit = false;
   String? editingField;
   XFile? _selectedFile;
   Uint8List? _selectedFileBytes;
@@ -45,9 +49,12 @@ class _ProfileState extends State<Profile> {
     if (user.userType == UserType.admin) {
       admin = await Spdb.getAdmin();
       isAdmin = true;
+      _canEdit = true;
     } else {
       employee = await Spdb.getEmployee();
       isAdmin = false;
+      final permission = await PermissionService.getPermissions('Employees');
+      _canEdit = permission?.canEdit ?? false;
     }
 
     if (employee != null) {
@@ -172,6 +179,7 @@ class _ProfileState extends State<Profile> {
   }
 
   Future<void> _changeProfileImage() async {
+    if (!_canEdit) return;
     XFile? imageFile;
 
     if (kIsWeb) {
@@ -609,22 +617,23 @@ class _ProfileState extends State<Profile> {
                   ),
                 ),
               ),
-              Material(
-                color: Theme.of(context).colorScheme.secondary,
-                shape: const CircleBorder(),
-                child: InkWell(
-                  onTap: _changeProfileImage,
-                  customBorder: const CircleBorder(),
-                  child: Padding(
-                    padding: const EdgeInsets.all(10.0),
-                    child: Icon(
-                      kIsWindows ? Icons.upload_file_rounded : Iconsax.image,
-                      color: Colors.white,
-                      size: 20,
+              if (_canEdit)
+                Material(
+                  color: Theme.of(context).colorScheme.secondary,
+                  shape: const CircleBorder(),
+                  child: InkWell(
+                    onTap: _changeProfileImage,
+                    customBorder: const CircleBorder(),
+                    child: Padding(
+                      padding: const EdgeInsets.all(10.0),
+                      child: Icon(
+                        kIsWindows ? Icons.upload_file_rounded : Iconsax.image,
+                        color: Colors.white,
+                        size: 20,
+                      ),
                     ),
                   ),
                 ),
-              ),
             ],
           ),
 
@@ -783,6 +792,7 @@ class _ProfileState extends State<Profile> {
             "Marital Status",
             "maritalStatus",
             employee?.maritalStatus,
+            options: const ['Single', 'Married', 'Divorced', 'Widowed'],
           ),
           _buildDataPoint("About Me", "about", employee?.about),
           _buildDataPoint("Special Skills", "skills", employee?.skills),
@@ -984,7 +994,7 @@ class _ProfileState extends State<Profile> {
                       color: scheme.primary,
                     ),
             ),
-          ] else
+          ] else if (_canEdit)
             IconButton(
               tooltip: 'Change Password',
               onPressed: _startPasswordEdit,
@@ -1000,6 +1010,7 @@ class _ProfileState extends State<Profile> {
     String key,
     String? value, {
     bool editable = true,
+    List<String>? options,
   }) {
     bool isEditing = editingField == key;
     return Padding(
@@ -1021,7 +1032,23 @@ class _ProfileState extends State<Profile> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                if (isEditing)
+                if (isEditing && options != null)
+                  // Fixed-choice field: same searchable dropdown as the
+                  // employee form instead of a free-text box.
+                  FormDropdownSearch(
+                    items: options,
+                    initialItem:
+                        options.contains(controllers[key]?.text.trim())
+                        ? controllers[key]!.text.trim()
+                        : null,
+                    allowClear: false,
+                    onChanged: (selected) {
+                      if (selected != null) {
+                        controllers[key]?.text = selected.toString();
+                      }
+                    },
+                  )
+                else if (isEditing)
                   TextField(
                     controller: controllers[key],
                     autofocus: true,
@@ -1048,7 +1075,7 @@ class _ProfileState extends State<Profile> {
               ],
             ),
           ),
-          if (editable && !isAdmin)
+          if (editable && !isAdmin && _canEdit)
             IconButton(
               onPressed: () {
                 if (isEditing) {

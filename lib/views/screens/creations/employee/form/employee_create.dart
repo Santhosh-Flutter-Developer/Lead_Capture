@@ -1404,7 +1404,7 @@ class _EmployeeCreateState extends State<EmployeeCreate> {
         SizedBox(
           width: itemWidth,
           child: FormDropdownSearch(
-            items: const ['Single', 'Married'],
+            items: const ['Single', 'Married', 'Divorced', 'Widowed'],
             initialItem: 'Single',
             label: 'Marital Status',
             onChanged: (value) {

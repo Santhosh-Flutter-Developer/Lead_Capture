@@ -1010,15 +1010,19 @@ class _ChatInputBarState extends State<ChatInputBar> {
         attachments = await _uploadFiles(pickedFiles);
       }
 
+      // uid = the message being edited, chatId = the chat it belongs to.
       await ChatService.editChatMessage(
-        uid: uid,
-        chatId: editingMessageId,
+        uid: editingMessageId,
+        chatId: uid,
         message: message,
         attachments: attachments,
       );
       // Edited existing message: no new-message notification.
     } catch (e) {
       debugPrint("Edit message error: $e");
+      if (mounted) {
+        FlushBar.show(context, e.toString(), isSuccess: false);
+      }
     } finally {
       // Temp copies made by paste / drop are no longer needed.
       for (final f in pickedFiles) {

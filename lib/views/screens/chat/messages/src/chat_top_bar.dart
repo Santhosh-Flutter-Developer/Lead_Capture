@@ -208,7 +208,7 @@ class ChatTopBar extends StatelessWidget implements PreferredSizeWidget {
                               builder: (context, snapshot) {
                                 if (userUid.isEmpty) {
                                   return Text(
-                                    "Last seen: Unknown",
+                                    "Offline",
                                     style: Theme.of(context)
                                         .textTheme
                                         .bodyMedium
@@ -218,7 +218,7 @@ class ChatTopBar extends StatelessWidget implements PreferredSizeWidget {
 
                                 if (!snapshot.hasData) {
                                   return Text(
-                                    "Last seen: loading...",
+                                    "Loading...",
                                     style: Theme.of(context)
                                         .textTheme
                                         .bodyMedium
@@ -229,9 +229,7 @@ class ChatTopBar extends StatelessWidget implements PreferredSizeWidget {
                                 final status = snapshot.data!;
 
                                 return Text(
-                                  status.isOnline
-                                      ? "Online"
-                                      : "Last seen: ${formatLastSeen(status.lastSeen)}",
+                                  presenceLabel(status),
                                   style: Theme.of(context).textTheme.bodyMedium
                                       ?.copyWith(color: AppColors.grey200),
                                 );
@@ -577,7 +575,7 @@ class ChatTopBarDesktop extends StatelessWidget implements PreferredSizeWidget {
                             builder: (context, snapshot) {
                               if (userUid.isEmpty) {
                                 return Text(
-                                  "Last seen: ",
+                                  "Offline",
                                   style: Theme.of(context).textTheme.bodySmall
                                       ?.copyWith(color: AppColors.grey500),
                                 );
@@ -591,9 +589,7 @@ class ChatTopBarDesktop extends StatelessWidget implements PreferredSizeWidget {
                               }
                               final status = snapshot.data!;
                               return Text(
-                                status.isOnline
-                                    ? "Online"
-                                    : "Last seen: ${formatLastSeen(status.lastSeen)}",
+                                presenceLabel(status),
                                 style: Theme.of(context).textTheme.bodySmall
                                     ?.copyWith(color: AppColors.grey500),
                               );
@@ -634,11 +630,23 @@ class ChatTopBarDesktop extends StatelessWidget implements PreferredSizeWidget {
   }
 }
 
+/// Presence text shown under a user's name in chat.
+///  - online                      -> "Online"
+///  - never logged in (no stamp)  -> "Never logged in"
+///  - otherwise                   -> "Offline"
+String presenceLabel(UserStatusModel status) {
+  if (status.isOnline) return "Online";
+  if (status.lastSeen == null) return "Never logged in";
+  return "Offline";
+}
+
 String formatLastSeen(DateTime? time) {
   if (time == null) return "Unknown";
 
   final now = DateTime.now();
-  final diff = now.difference(time);
+  var diff = now.difference(time);
+  // Server/device clock skew can put the timestamp slightly in the future.
+  if (diff.isNegative) diff = Duration.zero;
 
   String formatTime12(DateTime t) {
     final hour = t.hour % 12 == 0 ? 12 : t.hour % 12;
@@ -647,15 +655,21 @@ String formatLastSeen(DateTime? time) {
     return "$hour:$minute $period";
   }
 
-  if (diff.inMinutes < 1) {
-    return "Just now";
-  } else if (diff.inMinutes < 60) {
-    return "${diff.inMinutes} min ago";
-  } else if (diff.inHours < 24) {
-    return "${diff.inHours} hours ago";
-  } else if (diff.inDays == 1) {
-    return "Yesterday, ${formatTime12(time)}";
-  } else {
-    return "${time.day}-${time.month}-${time.year}, ${formatTime12(time)}";
+  if (diff.inMinutes < 1) return "Just now";
+  if (diff.inMinutes < 60) return "${diff.inMinutes} min ago";
+  if (diff.inHours < 24) {
+    final h = diff.inHours;
+    return h == 1 ? "1 hour ago" : "$h hours ago";
   }
+
+  // Compare calendar days (not 24h blocks) so e.g. 47h ago on a Wednesday
+  // morning is not reported as "Yesterday".
+  final today = DateTime(now.year, now.month, now.day);
+  final seenDay = DateTime(time.year, time.month, time.day);
+  final dayDiff = today.difference(seenDay).inDays;
+  if (dayDiff == 1) return "Yesterday, ${formatTime12(time)}";
+
+  final dd = time.day.toString().padLeft(2, '0');
+  final mm = time.month.toString().padLeft(2, '0');
+  return "$dd-$mm-${time.year}, ${formatTime12(time)}";
 }
