@@ -276,6 +276,71 @@ class _ChatListingViewState extends State<ChatListingView> {
   }
 }
 
+/// Filter tabs shown above the chat list.
+enum ChatFilter { all, pinned, favorites, groups, direct }
+
+extension ChatFilterX on ChatFilter {
+  String get label {
+    switch (this) {
+      case ChatFilter.all:
+        return 'All';
+      case ChatFilter.pinned:
+        return 'Pinned';
+      case ChatFilter.favorites:
+        return 'Favorites';
+      case ChatFilter.groups:
+        return 'Groups';
+      case ChatFilter.direct:
+        return 'Direct';
+    }
+  }
+
+  IconData? get icon {
+    switch (this) {
+      case ChatFilter.all:
+        return null;
+      case ChatFilter.pinned:
+        return Icons.push_pin;
+      case ChatFilter.favorites:
+        return Icons.favorite;
+      case ChatFilter.groups:
+        return Icons.groups_rounded;
+      case ChatFilter.direct:
+        return Icons.person;
+    }
+  }
+
+  Color? get iconColor {
+    switch (this) {
+      case ChatFilter.pinned:
+        return Colors.orange;
+      case ChatFilter.favorites:
+        return Colors.red;
+      case ChatFilter.groups:
+        return Colors.indigo;
+      case ChatFilter.direct:
+        return Colors.teal;
+      case ChatFilter.all:
+        return null;
+    }
+  }
+
+  String get emptyText {
+    switch (this) {
+      case ChatFilter.all:
+        return 'No chats available';
+      case ChatFilter.pinned:
+        return 'No pinned chats';
+      case ChatFilter.favorites:
+        return 'No favorite chats';
+      case ChatFilter.groups:
+        return 'No group chats';
+      case ChatFilter.direct:
+        return 'No direct chats';
+    }
+  }
+}
+
 class ChatListPanel extends StatefulWidget {
   final List<ChatModel> chats;
   final String? selectedChatUid;
@@ -305,6 +370,7 @@ class _ChatListPanelState extends State<ChatListPanel> {
   List<dynamic> _allUsers = []; // All employees and admins for search
   List<dynamic> _filteredUsers = []; // Filtered users from search
   bool _showUserResults = false; // Whether to show user search results
+  ChatFilter _selectedFilter = ChatFilter.all;
   final ScrollController _scrollController = ScrollController();
 
   @override
@@ -366,6 +432,25 @@ class _ChatListPanelState extends State<ChatListPanel> {
         if (chat.isDeletedForUser(widget.currentUserUid)) {
           return false;
         }
+
+        // Tab filter (All / Pinned / Favorites / Groups / Direct)
+        switch (_selectedFilter) {
+          case ChatFilter.all:
+            break;
+          case ChatFilter.pinned:
+            if (!chat.isPinnedForUser(widget.currentUserUid)) return false;
+            break;
+          case ChatFilter.favorites:
+            if (!chat.isFavoriteForUser(widget.currentUserUid)) return false;
+            break;
+          case ChatFilter.groups:
+            if (!chat.isGroupChat) return false;
+            break;
+          case ChatFilter.direct:
+            if (chat.isGroupChat) return false;
+            break;
+        }
+
         String chatName = '';
 
         if (chat.isGroupChat) {
@@ -431,7 +516,9 @@ class _ChatListPanelState extends State<ChatListPanel> {
         
         _filteredUsers = _filteredUsers.where((user) => !existingChatUids.contains(user.uid)).toList();
         
-        _showUserResults = _filteredUsers.isNotEmpty;
+        _showUserResults = _filteredUsers.isNotEmpty &&
+            (_selectedFilter == ChatFilter.all ||
+                _selectedFilter == ChatFilter.direct);
       } else {
         _filteredUsers = [];
         _showUserResults = false;
@@ -546,6 +633,7 @@ class _ChatListPanelState extends State<ChatListPanel> {
               ],
             ),
           ),
+          _buildFilterChips(context),
           Divider(
             height: 1,
             color: Theme.of(context).colorScheme.outlineVariant,
@@ -597,7 +685,7 @@ class _ChatListPanelState extends State<ChatListPanel> {
                       if (_filteredChats.isEmpty) {
                         return SizedBox(
                           height: 300,
-                          child: NoData(text: "No chats available"),
+                          child: NoData(text: _selectedFilter.emptyText),
                         );
                       }
                       final chat = _filteredChats[chatIndex];
@@ -708,6 +796,62 @@ class _ChatListPanelState extends State<ChatListPanel> {
             // ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildFilterChips(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+        itemCount: ChatFilter.values.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final filter = ChatFilter.values[index];
+          final selected = filter == _selectedFilter;
+          return InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () {
+              if (_selectedFilter == filter) return;
+              _selectedFilter = filter;
+              _filterChats();
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: selected ? scheme.primary : Colors.transparent,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: selected ? scheme.primary : scheme.outlineVariant,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (filter.icon != null) ...[
+                    Icon(
+                      filter.icon,
+                      size: 14,
+                      color: selected ? scheme.onPrimary : filter.iconColor,
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  Text(
+                    filter.label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: selected ? scheme.onPrimary : scheme.onSurface,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }
