@@ -22,6 +22,7 @@ class CustomSearchableDropdown<T> extends StatefulWidget {
   final Widget? emptyWidget;
   final bool showDoneButton; // show done to confirm selections in multi-select
   final bool showClearButton; // show an "x" to clear the current selection (single-select only)
+  final double height; // height of the closed control
 
   const CustomSearchableDropdown({
     super.key,
@@ -39,6 +40,7 @@ class CustomSearchableDropdown<T> extends StatefulWidget {
     this.emptyWidget,
     this.showDoneButton = true,
     this.showClearButton = true,
+    this.height = 33,
   });
 
   @override
@@ -675,7 +677,7 @@ class _CustomSearchableDropdownState<T>
           },
           child: Container(
             padding: widget.padding,
-            height: 33,
+            height: widget.height,
             decoration: BoxDecoration(
               border: Border.all(
                 color: _focusNode.hasFocus

@@ -85,7 +85,11 @@ class UsersBloc extends Bloc<UsersEvent, UsersState> {
           await ApiLookup.ensure();
           final res = (await EmployeesApiService.list()).ensureSuccess();
           final rows = res.dataList.map(Js.m).toList();
-          final admins = rows.where(ApiMappers.isAdminRow).map((r) => ApiMappers.admin(r).toUserRowModel());
+          // AdminModel has no employeeId, so carry the server's `employee_id`
+          // (e.g. ADMIN01) over to the row.
+          final admins = rows
+              .where(ApiMappers.isAdminRow)
+              .map((r) => ApiMappers.admin(r).toUserRowModel().copyWith(employeeId: Js.s(r['employee_id'])));
           final emps = rows.where((r) => !ApiMappers.isAdminRow(r)).map((r) => ApiMappers.employee(r).toUserRowModel());
           return [...admins, ...emps];
         }),

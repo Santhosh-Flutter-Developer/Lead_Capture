@@ -296,6 +296,32 @@ class ApiMappers {
 
   static bool isAdminRow(Map<String, dynamic> m) => Js.s(m['user_type']).toLowerCase() == 'admin';
 
+  /// employees.php `list` returns the latest mobile / desktop login of each
+  /// user as `mobile_login` / `desktop_login` = {label, time}. The Employees
+  /// page reads them from `UserRowModel.devices`, so turn them into device
+  /// maps here. `kind` ('mobile' | 'desktop') is what the page groups by;
+  /// the rest matches `DeviceModel.fromMap` so other screens keep working.
+  static List<Map<String, dynamic>> devicesFrom(Map<String, dynamic> m) {
+    final out = <Map<String, dynamic>>[];
+    void add(dynamic v, String kind) {
+      final d = Js.m(v);
+      if (d.isEmpty) return;
+      final label = Js.s(d['label']).trim();
+      final at = Js.dt(d['time']);
+      out.add({
+        'deviceId': '$kind-${Js.s(m['uid'])}',
+        'kind': kind,
+        'platform': label,
+        'model': label,
+        'lastLoginAt': at?.millisecondsSinceEpoch,
+      });
+    }
+
+    add(m['mobile_login'], 'mobile');
+    add(m['desktop_login'], 'desktop');
+    return out;
+  }
+
   /// Requires `await ApiLookup.ensure()` beforehand.
   static EmployeeModel employee(Map<String, dynamic> m) {
     final dept = ApiLookup.uidOf(ApiLookup.kDepartment, m['department_id']);
@@ -326,6 +352,7 @@ class ApiMappers {
       maritalStatus: Js.s(m['marital_status']),
       isActive: active,
       lastActive: Js.dt(m['last_active']),
+      devices: devicesFrom(m),
       isInitialPasswordChanged: Js.b(m['is_initial_password_changed'], true),
       outsideOffice: Js.b(m['outside_office']),
       createdBy: createdBy(m),
@@ -346,6 +373,7 @@ class ApiMappers {
         createdAt: Js.dt(m['created_at']),
         updatedAt: Js.dt(m['updated_at']),
         lastActive: Js.dt(m['last_active']),
+        devices: devicesFrom(m),
         address: Js.opt(m['address']),
         about: Js.opt(m['about']),
         skills: Js.opt(m['skills']),

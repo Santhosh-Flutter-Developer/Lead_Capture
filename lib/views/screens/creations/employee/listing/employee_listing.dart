@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:iconsax/iconsax.dart';
@@ -21,6 +23,50 @@ import 'bloc/employee_bloc.dart';
 
 const String _pageTitle = "Employees";
 
+/// Role-filter value used for administrators (they have no role row).
+const String _kAdminRole = '__admin__';
+
+// Sort column ids (what `PaginatedDataController.sortColumnIndex` holds).
+const int _sId = 0;
+const int _sName = 1;
+const int _sDept = 2;
+const int _sEmail = 3;
+const int _sStatus = 4;
+
+/// One table column: header label, relative width and (optional) sort id.
+class _Col {
+  final String label;
+  final double flex;
+  final int? sortId;
+  const _Col(this.label, this.flex, [this.sortId]);
+}
+
+const _cId = _Col('Employee ID', 1.1, _sId);
+const _cName = _Col('Name', 1.9, _sName);
+const _cDept = _Col('Department', 1.7, _sDept);
+const _cRole = _Col('Role', 1.2);
+const _cEmail = _Col('Email', 1.9, _sEmail);
+const _cMobile = _Col('Mobile app', 1.35);
+const _cDesktop = _Col('Desktop app', 1.35);
+const _cStatus = _Col('Status', 0.95, _sStatus);
+const _cCreated = _Col('Created By', 1.6);
+const _cAction = _Col('Action', 1.3);
+const List<_Col> _columns = [
+  _cId,
+  _cName,
+  _cDept,
+  _cRole,
+  _cEmail,
+  _cMobile,
+  _cDesktop,
+  _cStatus,
+  _cCreated,
+  _cAction,
+];
+
+const double _kCheckW = 48;
+const double _kMinTableWidth = 1640;
+
 class EmployeeListing extends StatelessWidget {
   const EmployeeListing({super.key});
 
@@ -30,43 +76,61 @@ class EmployeeListing extends StatelessWidget {
       create: (context) => UsersBloc()..add(StreamUsers()),
       child: ChangeNotifierProvider(
         create: (context) => PaginatedDataController<UserRowModel>(
-          initialSortColumnIndex: 0,
+          initialSortColumnIndex: _sId,
           filterLogic: (employee, query) {
-            final q = query.toLowerCase();
+            final q = query.trim().toLowerCase();
+            if (q.isEmpty) return true;
             return employee.name.toLowerCase().contains(q) ||
-                employee.name.toLowerCase().contains(q);
+                employee.email.toLowerCase().contains(q) ||
+                (employee.employeeId ?? '').toLowerCase().contains(q) ||
+                employee.mobileNumber.toLowerCase().contains(q);
           },
           sortLogic: (a, b, col, asc) {
             int compare;
             switch (col) {
-              case 0:
-                compare = a.uid.toLowerCase().compareTo(b.uid.toLowerCase());
+              case _sId:
+                compare = (a.employeeId ?? '').toLowerCase().compareTo(
+                  (b.employeeId ?? '').toLowerCase(),
+                );
                 break;
-              case 1:
+              case _sName:
                 compare = a.name.toLowerCase().compareTo(b.name.toLowerCase());
                 break;
-              case 2:
+              case _sDept:
+                compare = _departmentText(a).toLowerCase().compareTo(
+                  _departmentText(b).toLowerCase(),
+                );
+                break;
+              case _sEmail:
                 compare = a.email.toLowerCase().compareTo(
                   b.email.toLowerCase(),
                 );
                 break;
-              case 3:
-                compare = a.isActive.toString().compareTo(
-                  b.isActive.toString(),
-                );
+              case _sStatus:
+                compare = (a.isActive ? 1 : 0).compareTo(b.isActive ? 1 : 0);
                 break;
               default:
-                compare = (a.uid).compareTo(b.uid);
+                compare = a.uid.compareTo(b.uid);
                 break;
             }
             return asc ? compare : -compare;
           },
           getItemId: (employee) => employee.uid,
-        ),
+        )..setSort(_sId, false), // newest / highest Employee ID first
         child: const EmployeeListingView(),
       ),
     );
   }
+}
+
+/// "Sales & Marketing, Finance" - names of every department of [u].
+String _departmentText(UserRowModel u) {
+  final d = u.department;
+  if (d == null || d.isEmpty) return '';
+  return d
+      .map((uid) => CacheService.departmentByUid(uid)?.name ?? '')
+      .where((n) => n.isNotEmpty)
+      .join(', ');
 }
 
 class EmployeeListingView extends StatefulWidget {
@@ -77,15 +141,17 @@ class EmployeeListingView extends StatefulWidget {
 }
 
 class _EmployeeListingViewState extends State<EmployeeListingView> {
-  final List<UserRowModel> _selectedEmployees = [];
-  final List<UserRowModel> _employeesList = [];
   PermissionModel? permissions;
   bool _permissionsLoaded = false;
   PermissionModel? tasksPermissions;
-  bool _isAdmin = false;
   final ScrollController _hScrollController = ScrollController();
-final ScrollController _scrollController = ScrollController();
+  final ScrollController _scrollController = ScrollController();
   final TextEditingController _chatMessage = TextEditingController();
+
+  // ── Filters ('' = "All") ──
+  String _fRole = '';
+  String _fDept = '';
+  String _fStatus = ''; // '', 'active', 'inactive'
 
   @override
   void initState() {
@@ -104,7 +170,6 @@ final ScrollController _scrollController = ScrollController();
   Future<void> _loadPermissions() async {
     permissions = await PermissionService.getPermissions(_pageTitle);
     tasksPermissions = await PermissionService.getPermissions('Tasks');
-    _isAdmin = await Spdb.isAdminLoggedIn();
     if (!mounted) return;
     _permissionsLoaded = true;
     setState(() {});
@@ -113,6 +178,71 @@ final ScrollController _scrollController = ScrollController();
   Future<void> _refreshUsers() async {
     context.read<UsersBloc>().add(StreamUsers());
   }
+
+  // ───────────────────────── filters ─────────────────────────
+
+  bool get _hasActiveFilters =>
+      _fRole.isNotEmpty || _fDept.isNotEmpty || _fStatus.isNotEmpty;
+
+  bool _matches(UserRowModel u) {
+    if (_fRole.isNotEmpty) {
+      if (_fRole == _kAdminRole) {
+        if (!u.isAdmin) return false;
+      } else if ((u.role ?? '') != _fRole) {
+        return false;
+      }
+    }
+    if (_fDept.isNotEmpty &&
+        !(u.department ?? const <String>[]).contains(_fDept)) {
+      return false;
+    }
+    if (_fStatus == 'active' && !u.isActive) return false;
+    if (_fStatus == 'inactive' && u.isActive) return false;
+    return true;
+  }
+
+  /// Re-applies the filters. The selection is cleared because ticked rows may
+  /// no longer be visible (and must not be bulk-deleted unseen).
+  void _applyFilters(PaginatedDataController<UserRowModel> c) {
+    c.clearSelection();
+    c.setFilter(_hasActiveFilters ? _matches : null);
+  }
+
+  static Map<String, String> _sortedByLabel(Map<String, String> m) {
+    final entries = m.entries.toList()
+      ..sort((a, b) => a.value.toLowerCase().compareTo(b.value.toLowerCase()));
+    return {for (final e in entries) e.key: e.value};
+  }
+
+  /// Only roles that at least one listed user has (a filter with no rows
+  /// behind it is useless), plus "Admin" when an administrator is listed.
+  Map<String, String> _roleOptions(List<UserRowModel> users) {
+    final m = <String, String>{};
+    for (final u in users) {
+      if (u.isAdmin) {
+        m[_kAdminRole] = 'Admin';
+        continue;
+      }
+      final uid = u.role ?? '';
+      if (uid.isEmpty) continue;
+      final name = CacheService.roleByUid(uid)?.name ?? '';
+      if (name.isNotEmpty) m[uid] = name;
+    }
+    return _sortedByLabel(m);
+  }
+
+  Map<String, String> _departmentOptions(List<UserRowModel> users) {
+    final m = <String, String>{};
+    for (final u in users) {
+      for (final uid in u.department ?? const <String>[]) {
+        final name = CacheService.departmentByUid(uid)?.name ?? '';
+        if (name.isNotEmpty) m[uid] = name;
+      }
+    }
+    return _sortedByLabel(m);
+  }
+
+  // ───────────────────────── styles ─────────────────────────
 
   TextStyle _primaryCellStyle(BuildContext context, {FontWeight? fontWeight}) {
     return Theme.of(context).textTheme.bodySmall!.copyWith(
@@ -127,6 +257,8 @@ final ScrollController _scrollController = ScrollController();
     ).textTheme.bodySmall!.copyWith(color: context.colors.textSecondary);
   }
 
+  // ───────────────────────── build ─────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final controllerRead = context
@@ -135,6 +267,10 @@ final ScrollController _scrollController = ScrollController();
         .watch<PaginatedDataController<UserRowModel>>();
     final width = MediaQuery.of(context).size.width;
     final isWide = !kIsMobile && width >= 1000;
+    final selected = controllerWatch.filteredItems
+        .where((u) => controllerWatch.selectedIds.contains(u.uid))
+        .toList();
+
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: isWide
@@ -150,12 +286,12 @@ final ScrollController _scrollController = ScrollController();
         listenWhen: (previous, current) => current is UsersLoaded,
         listener: (context, state) {
           if (state is UsersLoaded) {
+            controllerRead.retainSelection(
+              state.users.map((u) => u.uid).toSet(),
+            );
             controllerRead.setData(state.users);
-            _employeesList.clear();
-            _employeesList.addAll(state.users);
           }
         },
-
         child: BlocBuilder<UsersBloc, UsersState>(
           builder: (context, state) {
             if (state is UsersLoading) {
@@ -172,13 +308,13 @@ final ScrollController _scrollController = ScrollController();
               return RefreshIndicator(
                 onRefresh: () => _refreshUsers(),
                 child: Scrollbar(
-                    controller: _scrollController,
-                    thumbVisibility: true,
-                    interactive: true,
-                    trackVisibility: true,
-                    radius: const Radius.circular(8),
-                    thickness: 8,
-                    child: ListView(
+                  controller: _scrollController,
+                  thumbVisibility: true,
+                  interactive: true,
+                  trackVisibility: true,
+                  radius: const Radius.circular(8),
+                  thickness: 8,
+                  child: ListView(
                     controller: _scrollController,
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: EdgeInsets.all(isWide ? 24.0 : 14.0),
@@ -187,34 +323,12 @@ final ScrollController _scrollController = ScrollController();
                         _buildHeaderBanner(context, state.users.length),
                         const SizedBox(height: 20),
                       ],
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.surface,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: Theme.of(context).colorScheme.outlineVariant,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.shadow.withValues(alpha: 0.05),
-                              blurRadius: 10,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildFilterRow(
-                              onSearchChanged: controllerRead.setSearch,
-                            ),
-                            const SizedBox(height: 14),
-                            _buildActionRow(),
-                          ],
-                        ),
+                      _buildToolbarCard(
+                        context,
+                        state.users,
+                        controllerRead,
+                        controllerWatch,
+                        selected,
                       ),
                       const SizedBox(height: 18),
                       controllerWatch.paginatedItems.isEmpty
@@ -223,151 +337,10 @@ final ScrollController _scrollController = ScrollController();
                                   ? "No employees available"
                                   : "No matching records found",
                             )
-                          : Container(
-                              decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.surface,
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.outlineVariant,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.shadow.withValues(alpha: 0.06),
-                                    blurRadius: 14,
-                                    offset: const Offset(0, 6),
-                                  ),
-                                ],
-                              ),
-                              child: Column(
-                                children: [
-                                  LayoutBuilder(
-                                    builder: (context, constraints) {
-                                      return Scrollbar(
-                                        controller: _hScrollController,
-                                        thumbVisibility: true,
-                                        trackVisibility: true,
-                                        thickness: 4,
-                                        radius: const Radius.circular(6),
-                                        scrollbarOrientation:
-                                            ScrollbarOrientation.bottom,
-                                        child: SingleChildScrollView(
-                                          controller: _hScrollController,
-                                          scrollDirection: Axis.horizontal,
-                                          child: ConstrainedBox(
-                                            constraints: BoxConstraints(
-                                              minWidth: constraints.maxWidth,
-                                            ),
-                                            child: DataTable(
-                                              showCheckboxColumn: true,
-                                              columnSpacing: 24,
-                                              horizontalMargin: 16,
-                                              headingRowHeight: 48,
-                                              dataRowMinHeight: 56,
-                                              dataRowMaxHeight: 64,
-                                              sortColumnIndex:
-                                                  controllerWatch.sortColumnIndex,
-                                              sortAscending:
-                                                  controllerWatch.sortAscending,
-                  
-                                              headingRowColor:
-                                                  WidgetStateProperty.all(
-                                                    Theme.of(context)
-                                                        .colorScheme
-                                                        .primary
-                                                        .withValues(alpha: 0.06),
-                                                  ),
-                                              headingTextStyle: Theme.of(context)
-                                                  .textTheme
-                                                  .bodySmall
-                                                  ?.copyWith(
-                                                    fontWeight: FontWeight.bold,
-                                                    color: Theme.of(
-                                                      context,
-                                                    ).colorScheme.primary,
-                                                  ),
-                                              dataTextStyle: Theme.of(context)
-                                                  .textTheme
-                                                  .bodySmall
-                                                  ?.copyWith(
-                                                    color: context
-                                                        .colors
-                                                        .textPrimary,
-                                                  ),
-                  
-                                              columns: [
-                                                DataColumn(
-                                                  label: const Text(
-                                                    "Employee ID",
-                                                  ),
-                                                  onSort: controllerRead.setSort,
-                                                ),
-                                                DataColumn(
-                                                  label: const Text("Name"),
-                                                  onSort: controllerRead.setSort,
-                                                ),
-                                                DataColumn(
-                                                  label: const Text(
-                                                    "Department",
-                                                  ),
-                                                  onSort: controllerRead.setSort,
-                                                ),
-                                                const DataColumn(
-                                                  label: Text("Role"),
-                                                ),
-                                                DataColumn(
-                                                  label: const Text("Email"),
-                                                  onSort: controllerRead.setSort,
-                                                ),
-                                                const DataColumn(
-                                                  label: Text("Mobile app"),
-                                                ),
-                                                const DataColumn(
-                                                  label: Text("Desktop app"),
-                                                ),
-                                                DataColumn(
-                                                  label: const Text("Status"),
-                                                  onSort: controllerRead.setSort,
-                                                ),
-                                                const DataColumn(
-                                                  label: Text("Created By"),
-                                                ),
-                                                const DataColumn(
-                                                  label: Text("Action"),
-                                                ),
-                                              ],
-                  
-                                              rows: controllerWatch.paginatedItems
-                                                  .asMap()
-                                                  .entries
-                                                  .map(
-                                                    (entry) => _buildDataRow(
-                                                      context,
-                                                      entry.value, // user
-                                                      entry.key, // 👈 index
-                                                      controllerWatch,
-                                                      controllerRead,
-                                                    ),
-                                                  )
-                                                  .toList(),
-                                            ),
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  const Padding(
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: 16.0,
-                                      vertical: 12.0,
-                                    ),
-                                    child: PaginationControls<UserRowModel>(),
-                                  ),
-                                ],
-                              ),
+                          : _buildTableCard(
+                              context,
+                              controllerWatch,
+                              controllerRead,
                             ),
                     ],
                   ),
@@ -389,6 +362,891 @@ final ScrollController _scrollController = ScrollController();
       ),
     );
   }
+
+  // ───────────────────────── toolbar card ─────────────────────────
+
+  BoxDecoration _cardDecoration(BuildContext context, {double shadow = 0.05}) {
+    final scheme = Theme.of(context).colorScheme;
+    return BoxDecoration(
+      color: scheme.surface,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: scheme.outlineVariant),
+      boxShadow: [
+        BoxShadow(
+          color: scheme.shadow.withValues(alpha: shadow),
+          blurRadius: 12,
+          offset: const Offset(0, 5),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildToolbarCard(
+    BuildContext context,
+    List<UserRowModel> all,
+    PaginatedDataController<UserRowModel> cr,
+    PaginatedDataController<UserRowModel> cw,
+    List<UserRowModel> selected,
+  ) {
+    final scheme = Theme.of(context).colorScheme;
+    final compact = kIsMobile || MediaQuery.of(context).size.width < 1000;
+
+    final roleDd = _FilterDropdown(
+      allLabel: 'All Roles',
+      value: _fRole,
+      options: _roleOptions(all),
+      width: 160,
+      onChanged: (v) {
+        setState(() => _fRole = v);
+        _applyFilters(cr);
+      },
+    );
+    final deptDd = _FilterDropdown(
+      allLabel: 'All Departments',
+      value: _fDept,
+      options: _departmentOptions(all),
+      width: 190,
+      onChanged: (v) {
+        setState(() => _fDept = v);
+        _applyFilters(cr);
+      },
+    );
+    final statusDd = _FilterDropdown(
+      allLabel: 'All Status',
+      value: _fStatus,
+      options: const {'active': 'Active', 'inactive': 'Inactive'},
+      width: 140,
+      onChanged: (v) {
+        setState(() => _fStatus = v);
+        _applyFilters(cr);
+      },
+    );
+    final totalChip = _TotalChip(count: cw.totalEntries);
+
+    return Container(
+      padding: EdgeInsets.all(compact ? 14 : 20),
+      decoration: _cardDecoration(context),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (compact) ...[
+            Row(
+              children: [
+                Expanded(child: _EmployeeSearchField(onChanged: cr.setSearch)),
+                const SizedBox(width: 10),
+                _buildRefreshButton(),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [roleDd, deptDd, statusDd, totalChip],
+            ),
+          ] else
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Wrap: on a narrow desktop window the filters flow onto a
+                // second line instead of overflowing.
+                Expanded(
+                  child: Wrap(
+                    spacing: 12,
+                    runSpacing: 10,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      _EmployeeSearchField(onChanged: cr.setSearch, width: 250),
+                      roleDd,
+                      deptDd,
+                      statusDd,
+                      totalChip,
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                _buildRefreshButton(),
+              ],
+            ),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Divider(height: 1, color: scheme.outlineVariant),
+          ),
+          _buildActionRow(selected, cr),
+        ],
+      ),
+    );
+  }
+
+  // ───────────────────────── table card ─────────────────────────
+
+  Widget _buildTableCard(
+    BuildContext context,
+    PaginatedDataController<UserRowModel> cw,
+    PaginatedDataController<UserRowModel> cr,
+  ) {
+    return Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: _cardDecoration(context, shadow: 0.06),
+      child: Column(
+        children: [
+          _buildTable(context, cw, cr),
+          _buildFooter(context, cw, cr),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTable(
+    BuildContext context,
+    PaginatedDataController<UserRowModel> cw,
+    PaginatedDataController<UserRowModel> cr,
+  ) {
+    final scheme = Theme.of(context).colorScheme;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tableWidth = math.max(constraints.maxWidth, _kMinTableWidth);
+        final flexTotal = _columns.fold<double>(0, (s, c) => s + c.flex);
+        final usable = tableWidth - _kCheckW;
+        double widthOf(_Col c) => usable * c.flex / flexTotal;
+
+        final pageIds = cw.paginatedItems.map((u) => u.uid).toList();
+        final selectedOnPage = pageIds
+            .where((id) => cw.selectedIds.contains(id))
+            .length;
+        final bool? allValue = selectedOnPage == 0
+            ? false
+            : (selectedOnPage == pageIds.length ? true : null);
+
+        final header = Container(
+          height: 48,
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
+            border: Border(
+              top: BorderSide(color: scheme.outlineVariant),
+              bottom: BorderSide(color: scheme.outlineVariant),
+            ),
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: _kCheckW,
+                child: Center(
+                  child: Checkbox(
+                    value: allValue,
+                    tristate: true,
+                    visualDensity: VisualDensity.compact,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    onChanged: (_) {
+                      if (allValue == true) {
+                        cr.deselectAll(pageIds);
+                      } else {
+                        cr.selectAll(pageIds);
+                      }
+                    },
+                  ),
+                ),
+              ),
+              for (final col in _columns)
+                _headerCell(context, col, widthOf(col), cw, cr),
+            ],
+          ),
+        );
+
+        return Scrollbar(
+          controller: _hScrollController,
+          thumbVisibility: true,
+          trackVisibility: true,
+          thickness: 4,
+          radius: const Radius.circular(6),
+          scrollbarOrientation: ScrollbarOrientation.bottom,
+          child: SingleChildScrollView(
+            controller: _hScrollController,
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: tableWidth,
+              child: Column(
+                children: [
+                  header,
+                  for (final user in cw.paginatedItems)
+                    _buildRow(context, user, cw, cr, widthOf),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _headerCell(
+    BuildContext context,
+    _Col col,
+    double width,
+    PaginatedDataController<UserRowModel> cw,
+    PaginatedDataController<UserRowModel> cr,
+  ) {
+    final scheme = Theme.of(context).colorScheme;
+    final sortId = col.sortId;
+    final active = sortId != null && cw.sortColumnIndex == sortId;
+    final label = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: Text(
+            col.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: scheme.primary,
+            ),
+          ),
+        ),
+        if (sortId != null) ...[
+          const SizedBox(width: 4),
+          Icon(
+            active
+                ? (cw.sortAscending
+                      ? Icons.arrow_upward_rounded
+                      : Icons.arrow_downward_rounded)
+                : Icons.swap_vert_rounded,
+            size: 14,
+            color: active
+                ? scheme.primary
+                : scheme.onSurfaceVariant.withValues(alpha: 0.7),
+          ),
+        ],
+      ],
+    );
+
+    return SizedBox(
+      width: width,
+      child: sortId == null
+          ? Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Align(alignment: Alignment.centerLeft, child: label),
+            )
+          : InkWell(
+              onTap: () => cr.setSort(sortId, active ? !cw.sortAscending : true),
+              child: Container(
+                height: 48,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                alignment: Alignment.centerLeft,
+                child: label,
+              ),
+            ),
+    );
+  }
+
+  // ───────────────────────── row ─────────────────────────
+
+  Widget _buildRow(
+    BuildContext context,
+    UserRowModel user,
+    PaginatedDataController<UserRowModel> cw,
+    PaginatedDataController<UserRowModel> cr,
+    double Function(_Col) widthOf,
+  ) {
+    final scheme = Theme.of(context).colorScheme;
+    final width = MediaQuery.of(context).size.width;
+    final isSelected = cw.selectedIds.contains(user.uid);
+
+    void openUser() {
+      final Widget page = user.isAdmin
+          ? AdminProfile(admin: user.toAdminModel())
+          : EmployeeDetails(employee: user.toEmployeeModel());
+      if (kIsMobile || width < 1000) {
+        Sheet.showSheet(context, widget: page);
+      } else {
+        GeneralDialog.showRTLSheet(context, page);
+      }
+    }
+
+    Widget cell(_Col col, Widget child) => SizedBox(
+      width: widthOf(col),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Align(alignment: Alignment.centerLeft, child: child),
+      ),
+    );
+
+    final designation =
+        CacheService.designationByUid(user.designation ?? '')?.name ??
+        (user.isAdmin ? 'Administrator' : '');
+    final deptText = _departmentText(user);
+    final subDept = (user.subDepartment ?? '').isEmpty
+        ? ''
+        : (CacheService.subDepartmentByUid(user.subDepartment!)?.name ?? '');
+
+    return Material(
+      color: isSelected
+          ? scheme.primary.withValues(alpha: 0.07)
+          : Colors.transparent,
+      child: InkWell(
+        onTap: openUser,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 58),
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: scheme.outlineVariant.withValues(alpha: 0.6),
+              ),
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: _kCheckW,
+                child: Center(
+                  child: Checkbox(
+                    value: isSelected,
+                    visualDensity: VisualDensity.compact,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    onChanged: (v) => cr.onSelected(user.uid, v),
+                  ),
+                ),
+              ),
+
+              /// Employee ID
+              cell(
+                _cId,
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest.withValues(
+                      alpha: 0.4,
+                    ),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: scheme.outlineVariant),
+                  ),
+                  child: Text(
+                    user.employeeId ?? '',
+                    style: _primaryCellStyle(
+                      context,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+
+              /// Name + designation
+              cell(
+                _cName,
+                Row(
+                  children: [
+                    UserAvatar(
+                      size: 32,
+                      showCrown: true,
+                      userData: UserDataModel(
+                        uid: user.uid,
+                        name: user.name,
+                        profilePic: user.profileImageUrl,
+                        userType: user.isAdmin
+                            ? UserType.admin
+                            : UserType.employee,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            user.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: _primaryCellStyle(
+                              context,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          if (designation.isNotEmpty)
+                            Text(
+                              designation,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: _secondaryCellStyle(
+                                context,
+                              ).copyWith(fontSize: 11),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              /// Department + sub department
+              cell(
+                _cDept,
+                deptText.isEmpty
+                    ? Text('—', style: _secondaryCellStyle(context))
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            deptText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: _primaryCellStyle(
+                              context,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (subDept.isNotEmpty)
+                            Text(
+                              subDept,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: _secondaryCellStyle(
+                                context,
+                              ).copyWith(fontSize: 11),
+                            ),
+                        ],
+                      ),
+              ),
+
+              /// Role badge
+              cell(_cRole, _roleBadge(context, user)),
+
+              /// Email
+              cell(
+                _cEmail,
+                Text(
+                  user.email,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: _primaryCellStyle(context),
+                ),
+              ),
+
+              /// Mobile app activity
+              cell(
+                _cMobile,
+                _activityCell(context, user, 'mobile', Icons.smartphone),
+              ),
+
+              /// Desktop app activity
+              cell(
+                _cDesktop,
+                _activityCell(context, user, 'desktop', Icons.laptop_mac),
+              ),
+
+              /// Status
+              cell(_cStatus, _statusPill(context, user.isActive)),
+
+              /// Created by
+              cell(_cCreated, _createdByCell(context, user)),
+
+              /// Actions
+              cell(_cAction, _actionButtons(context, user, width)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ───────────────────────── cells ─────────────────────────
+
+  static const List<Color> _roleColors = [
+    Color(0xFF4F46E5),
+    Color(0xFF2563EB),
+    Color(0xFF7C3AED),
+    Color(0xFF0284C7),
+  ];
+
+  Widget _roleBadge(BuildContext context, UserRowModel user) {
+    final textStyle = Theme.of(
+      context,
+    ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700, fontSize: 11);
+
+    if (user.isAdmin) {
+      const c = Color(0xFFD97706);
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF59E0B).withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.shield_outlined, size: 13, color: c),
+            const SizedBox(width: 4),
+            Text('Admin', style: textStyle?.copyWith(color: c)),
+          ],
+        ),
+      );
+    }
+
+    final name = CacheService.roleByUid(user.role ?? '')?.name ?? '';
+    if (name.isEmpty) return Text('—', style: _secondaryCellStyle(context));
+    final color = _roleColors[name.codeUnits.fold<int>(0, (s, c) => s + c) %
+        _roleColors.length];
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.11),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        name,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: textStyle?.copyWith(color: color),
+      ),
+    );
+  }
+
+  /// Latest login of [user] on a [kind] ('mobile' | 'desktop') device.
+  /// Fed by `mobile_login` / `desktop_login` of employees.php `list`
+  /// (see ApiMappers.devicesFrom).
+  Widget _activityCell(
+    BuildContext context,
+    UserRowModel user,
+    String kind,
+    IconData icon,
+  ) {
+    Map<String, dynamic>? device;
+    for (final d in user.devices ?? const <Map<String, dynamic>>[]) {
+      if (d['kind'] == kind) {
+        device = d;
+        break;
+      }
+    }
+    if (device == null) {
+      return Text('No activity', style: _secondaryCellStyle(context));
+    }
+
+    var label = (device['model'] ?? device['platform'] ?? '').toString().trim();
+    if (label.isEmpty || label.toLowerCase() == 'unknown') {
+      label = kind == 'mobile' ? 'Mobile' : 'Desktop';
+    }
+    final ms = device['lastLoginAt'];
+    final at = ms is int ? DateTime.fromMillisecondsSinceEpoch(ms) : null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 15, color: Theme.of(context).colorScheme.primary),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: _primaryCellStyle(context, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
+        if (at != null)
+          Padding(
+            padding: const EdgeInsets.only(left: 21),
+            child: Text(
+              DateFormat('dd MMM, hh:mm a').format(at),
+              style: _secondaryCellStyle(context).copyWith(fontSize: 11),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _statusPill(BuildContext context, bool active) {
+    final color = active ? AppColors.success : AppColors.danger;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: active ? 0.14 : 0.12),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            active ? 'Active' : 'Inactive',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w700,
+              fontSize: 11,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Avatar + creator name. Unlike CreatedByWidget the name is ellipsized, so
+  /// a long name can never overflow the column.
+  Widget _createdByCell(BuildContext context, UserRowModel user) {
+    return Row(
+      children: [
+        UserAvatar(size: 28, userData: user.createdBy),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            user.createdBy.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: _primaryCellStyle(context, fontWeight: FontWeight.w700),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _actionButtons(BuildContext context, UserRowModel user, double width) {
+    final canEdit = permissions?.canEdit ?? false;
+    final canDelete = permissions?.canDelete ?? false;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (canEdit)
+          _ActionIcon(
+            tooltip: 'Edit',
+            icon: Iconsax.edit,
+            color: AppColors.info,
+            onTap: () {
+              final page = EmployeeEdit(
+                uid: user.uid,
+                admin: user.isAdmin ? user.toAdminModel() : null,
+              );
+              if (kIsMobile || width < 1000) {
+                Sheet.showSheet(context, widget: page);
+              } else {
+                GeneralDialog.showRTLSheet(context, page);
+              }
+            },
+          ),
+        if (!user.isAdmin && canEdit) ...[
+          const SizedBox(width: 6),
+          _ActionIcon(
+            tooltip: user.isActive ? 'Block' : 'Unblock',
+            icon: user.isActive ? Icons.block_rounded : Icons.lock_open_rounded,
+            color: AppColors.orange,
+            circle: true,
+            onTap: () => _toggleBlock(user),
+          ),
+        ],
+        if (!user.isAdmin && canDelete) ...[
+          const SizedBox(width: 6),
+          _ActionIcon(
+            tooltip: 'Delete',
+            icon: Iconsax.trash,
+            color: AppColors.danger,
+            onTap: () => handleDelete(context, user),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// employees.php `block` / `unblock` (blocked users cannot log in).
+  Future<void> _toggleBlock(UserRowModel user) async {
+    final block = user.isActive;
+    final confirm = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => ConfirmDialog(
+        title: block ? 'Block Employee' : 'Unblock Employee',
+        content:
+            'Are you sure you want to ${block ? 'block' : 'unblock'} ${user.name}?',
+      ),
+    );
+    if (confirm != true) return;
+
+    try {
+      final res = block
+          ? await EmployeesApiService.block(user.uid)
+          : await EmployeesApiService.unblock(user.uid);
+      res.ensureSuccess();
+      ApiLive.changed({'employee', 'role'});
+      if (!mounted) return;
+      FlushBar.show(
+        context,
+        block ? 'Employee blocked successfully' : 'Employee unblocked successfully',
+      );
+    } catch (e, st) {
+      await ErrorService.recordError(e, st);
+      if (!mounted) return;
+      FlushBar.show(
+        context,
+        e is ApiException ? e.message : e.toString(),
+        isSuccess: false,
+      );
+    }
+  }
+
+  // ───────────────────────── footer / pagination ─────────────────────────
+
+  List<int> _pageWindow(int current, int total) {
+    if (total <= 5) return List.generate(total, (i) => i + 1);
+    var start = math.max(1, current - 2);
+    final end = math.min(total, start + 4);
+    start = math.max(1, end - 4);
+    return [for (var p = start; p <= end; p++) p];
+  }
+
+  Widget _buildFooter(
+    BuildContext context,
+    PaginatedDataController<UserRowModel> cw,
+    PaginatedDataController<UserRowModel> cr,
+  ) {
+    final scheme = Theme.of(context).colorScheme;
+    final compact = kIsMobile || MediaQuery.of(context).size.width < 1000;
+    final small = _secondaryCellStyle(context);
+
+    final info = Text(
+      'Showing ${cw.startEntry} to ${cw.endEntry} of ${cw.totalEntries} entries',
+      style: small,
+    );
+
+    final rowsPerPage = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('Rows per page:', style: small),
+        const SizedBox(width: 8),
+        Container(
+          height: 36,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: scheme.surface,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: scheme.outlineVariant),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<int>(
+              value: cw.rowsPerPage,
+              isDense: true,
+              borderRadius: BorderRadius.circular(8),
+              icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
+              style: Theme.of(context).textTheme.bodySmall,
+              items: const [10, 25, 50, 100]
+                  .map((v) => DropdownMenuItem<int>(value: v, child: Text('$v')))
+                  .toList(),
+              onChanged: cr.setRowsPerPage,
+            ),
+          ),
+        ),
+      ],
+    );
+
+    Widget pageButton({
+      required Widget child,
+      required bool enabled,
+      required VoidCallback onTap,
+      bool selected = false,
+    }) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 3),
+        child: Material(
+          color: selected ? scheme.primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: enabled ? onTap : null,
+            child: Container(
+              width: 32,
+              height: 32,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                border: selected
+                    ? null
+                    : Border.all(color: scheme.outlineVariant),
+              ),
+              child: child,
+            ),
+          ),
+        ),
+      );
+    }
+
+    final pager = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        pageButton(
+          enabled: cw.currentPage > 1,
+          onTap: cr.previousPage,
+          child: Icon(
+            Icons.chevron_left_rounded,
+            size: 18,
+            color: cw.currentPage > 1
+                ? scheme.onSurface
+                : scheme.onSurface.withValues(alpha: 0.3),
+          ),
+        ),
+        for (final p in _pageWindow(cw.currentPage, cw.totalPages))
+          pageButton(
+            enabled: true,
+            selected: p == cw.currentPage,
+            onTap: () => cr.goToPage(p),
+            child: Text(
+              '$p',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: p == cw.currentPage ? AppColors.white : scheme.onSurface,
+              ),
+            ),
+          ),
+        pageButton(
+          enabled: cw.currentPage < cw.totalPages,
+          onTap: cr.nextPage,
+          child: Icon(
+            Icons.chevron_right_rounded,
+            size: 18,
+            color: cw.currentPage < cw.totalPages
+                ? scheme.onSurface
+                : scheme.onSurface.withValues(alpha: 0.3),
+          ),
+        ),
+      ],
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      child: compact
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                info,
+                const SizedBox(height: 10),
+                rowsPerPage,
+                const SizedBox(height: 10),
+                pager,
+              ],
+            )
+          : Row(
+              children: [
+                info,
+                const SizedBox(width: 24),
+                rowsPerPage,
+                const Spacer(),
+                pager,
+              ],
+            ),
+    );
+  }
+
 
   Future<void> handleDelete(BuildContext context, UserRowModel user) async {
     // ❌ prevent admin delete
@@ -556,20 +1414,10 @@ final ScrollController _scrollController = ScrollController();
     );
   }
 
-  Widget _buildFilterRow({required ValueChanged<String> onSearchChanged}) {
-    final bool isCompact =
-        kIsMobile || MediaQuery.of(context).size.width < 1000;
-    if (!isCompact) return _EmployeeSearchField(onChanged: onSearchChanged);
-    return Row(
-      children: [
-        Expanded(child: _EmployeeSearchField(onChanged: onSearchChanged)),
-        const SizedBox(width: 10),
-        _buildRefreshButton(),
-      ],
-    );
-  }
-
-  Widget _buildActionRow() {
+  Widget _buildActionRow(
+    List<UserRowModel> selected,
+    PaginatedDataController<UserRowModel> controller,
+  ) {
     final width = MediaQuery.of(context).size.width;
     // Single source of truth for "mobile / narrow" layout
     final bool isCompact = kIsMobile || width < 1000;
@@ -716,7 +1564,7 @@ final ScrollController _scrollController = ScrollController();
               ),
             ),
             icon: Icon(Iconsax.export_3, size: 16),
-            onPressed: _employeesList.isEmpty
+            onPressed: controller.filteredItems.isEmpty
                 ? null
                 : () async {
                     try {
@@ -744,7 +1592,7 @@ final ScrollController _scrollController = ScrollController();
                         'Is Active',
                         'Created At',
                       ]);
-                      for (var i in _employeesList) {
+                      for (var i in controller.filteredItems) {
                         List<String> row = [];
                         row.addAll([
                           i.employeeId ?? "",
@@ -811,8 +1659,11 @@ final ScrollController _scrollController = ScrollController();
                     }
                   },
             style: ElevatedButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
+              backgroundColor: Theme.of(context).colorScheme.surface,
               foregroundColor: Theme.of(context).colorScheme.onSurface,
+              side: BorderSide(
+                color: Theme.of(context).colorScheme.outlineVariant,
+              ),
               elevation: 0,
               shape: const StadiumBorder(),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -874,7 +1725,7 @@ final ScrollController _scrollController = ScrollController();
           ),
         );*/
         if (!isCompact) buttons.add(const SizedBox(width: 10));
-        if (_selectedEmployees.isNotEmpty && (permissions?.canDelete ?? false)) {
+        if (selected.isNotEmpty && (permissions?.canDelete ?? false)) {
           buttons.add(
                   ElevatedButton.icon(
                     label: Text(
@@ -885,10 +1736,10 @@ final ScrollController _scrollController = ScrollController();
                     ),
                     icon: const Icon(Iconsax.trash, size: 16),
                     onPressed: () async {
-                      if (_selectedEmployees.isEmpty) return;
+                      if (selected.isEmpty) return;
 
                       // ✅ STEP 1: check assigned
-                      for (final employee in _selectedEmployees) {
+                      for (final employee in selected) {
                         final isAssigned =
                             await EmployeeService.isEmployeeAssigned(
                               employee.employeeId ?? '',
@@ -931,7 +1782,7 @@ final ScrollController _scrollController = ScrollController();
 
                       try {
                         // ✅ STEP 3: BACKUP
-                        final deletedEmployees = _selectedEmployees
+                        final deletedEmployees = selected
                             .where((e) => e.isEmployee)
                             .map((e) => e.toEmployeeModel())
                             .toList();
@@ -940,7 +1791,7 @@ final ScrollController _scrollController = ScrollController();
                         futureLoading(context);
 
                         // ✅ STEP 5: DELETE
-                        for (final emp in _selectedEmployees) {
+                        for (final emp in selected) {
                           if (emp.uid.isNotEmpty && emp.isEmployee) {
                             await EmployeeService.deleteEmployee(uid: emp.uid);
                           }
@@ -950,8 +1801,7 @@ final ScrollController _scrollController = ScrollController();
                         if (Navigator.canPop(context)) Navigator.pop(context);
 
                         // ✅ STEP 7: CLEAR SELECTION
-                        _selectedEmployees.clear();
-                        setState(() {});
+                        controller.clearSelection();
 
                         // ✅ STEP 8: SHOW UNDO
                         FlushBar.show(
@@ -992,12 +1842,12 @@ final ScrollController _scrollController = ScrollController();
           );
         }
         if (!isCompact) buttons.add(const SizedBox(width: 10));
-        if (_selectedEmployees.isNotEmpty) {
+        if (selected.isNotEmpty) {
           // Chat Button
           buttons.add(
             ElevatedButton.icon(
               onPressed: () async {
-                if (_selectedEmployees.isEmpty) {
+                if (selected.isEmpty) {
                   FlushBar.show(
                     context,
                     "Please select at least one employee.",
@@ -1005,7 +1855,7 @@ final ScrollController _scrollController = ScrollController();
                   );
                   return;
                 }
-                final bool isSingle = _selectedEmployees.length == 1;
+                final bool isSingle = selected.length == 1;
                 final GlobalKey<FormState> formKey = GlobalKey<FormState>();
 
                 final bool? confirm = await showDialog<bool>(
@@ -1023,8 +1873,8 @@ final ScrollController _scrollController = ScrollController();
                         children: [
                           Text(
                             isSingle
-                                ? "Do you want to start a chat with ${_selectedEmployees.first.name}?"
-                                : "Do you want to create a group chat with ${_selectedEmployees.length} employees?",
+                                ? "Do you want to start a chat with ${selected.first.name}?"
+                                : "Do you want to create a group chat with ${selected.length} employees?",
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                           const SizedBox(height: 8),
@@ -1079,7 +1929,7 @@ final ScrollController _scrollController = ScrollController();
                   final creatorName = creator?.name ?? "";
 
                   if (isSingle) {
-                    final emp = _selectedEmployees.first;
+                    final emp = selected.first;
 
                     if (emp.uid.isEmpty) {
                       Navigator.pop(context);
@@ -1135,7 +1985,7 @@ final ScrollController _scrollController = ScrollController();
                   }
 
                   var groupUsers = [
-                    ..._selectedEmployees
+                    ...selected
                         .map((e) => e.uid)
                         .where((id) => id.isNotEmpty),
                     sessionUser.uid,
@@ -1201,9 +2051,9 @@ final ScrollController _scrollController = ScrollController();
               },
               icon: const Icon(Icons.chat, size: 16),
               label: Text(
-                _selectedEmployees.length == 1
+                selected.length == 1
                     ? 'Chat'
-                    : 'Group Chat (${_selectedEmployees.length})',
+                    : 'Group Chat (${selected.length})',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -1235,7 +2085,7 @@ final ScrollController _scrollController = ScrollController();
                         context,
                         MaterialPageRoute(
                           builder: (_) => TaskCreate(
-                            employees: _selectedEmployees
+                            employees: selected
                                 .map((e) => e.toEmployeeModel())
                                 .toList(),
                           ),
@@ -1288,18 +2138,9 @@ final ScrollController _scrollController = ScrollController();
         }
 
         // ---------- DESKTOP / WIDE: single scrollable row + refresh ----------
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(children: buttons),
-              ),
-            ),
-            const SizedBox(width: 8),
-            _buildRefreshButton(),
-          ],
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(children: buttons),
         );
       },
     );
@@ -1326,421 +2167,142 @@ final ScrollController _scrollController = ScrollController();
       ),
     );
   }
+}
 
-  Widget buildPlatformCell({
-    required IconData icon,
-    required String? platformLabel,
-    required DateTime? lastLogin,
-  }) {
-    if (platformLabel == null && lastLogin == null) {
-      return Text('No activity', style: _secondaryCellStyle(context));
-    }
+// ---------------------------------------------------------------------
+// Toolbar widgets
+// ---------------------------------------------------------------------
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Row(
-          children: [
-            Icon(icon, size: 18, color: Theme.of(context).colorScheme.primary),
-            const SizedBox(width: 4),
-            Text(
-              platformLabel ?? 'Unknown device',
-              style: _primaryCellStyle(context, fontWeight: FontWeight.w500),
-            ),
-          ],
-        ),
-        if (lastLogin != null)
-          Padding(
-            padding: const EdgeInsets.only(left: 22),
-            child: Text(
-              DateFormat('dd MMM, hh:mm a').format(lastLogin),
-              style: _secondaryCellStyle(context),
-            ),
-          ),
-      ],
-    );
-  }
+/// Searchable dropdown ("All Roles", "All Departments", "All Status"): the
+/// app's CustomSearchableDropdown (search box + list). [value] is the option
+/// key, '' means "All".
+class _FilterDropdown extends StatelessWidget {
+  final String allLabel;
+  final String value;
+  final Map<String, String> options;
+  final ValueChanged<String> onChanged;
+  final double width;
 
-  PlatformType? getPlatformFromDevice(DeviceModel device) {
-    final platform = (device.platform ?? '').toLowerCase();
-    if (platform.contains('android') || platform.contains('ios')) {
-      return PlatformType.mobile;
-    } else if (platform.contains('windows') ||
-        platform.contains('mac') ||
-        platform.contains('linux') ||
-        platform.contains('microsoft')) {
-      return PlatformType.desktop;
-    }
-    return null;
-  }
+  const _FilterDropdown({
+    required this.allLabel,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+    required this.width,
+  });
 
-  DateTime? getLastLoginByPlatform(
-    List<DeviceModel> devices,
-    PlatformType type,
-  ) {
-    final filtered = devices.where((d) => getPlatformFromDevice(d) == type);
-    if (filtered.isEmpty) return null;
-
-    return filtered
-        .map((d) => d.lastLoginAt)
-        .whereType<DateTime>()
-        .fold<DateTime?>(null, (prev, curr) {
-          if (prev == null) return curr;
-          return curr.isAfter(prev) ? curr : prev;
-        });
-  }
-
-  String? getPlatformLabelByType(List<DeviceModel> devices, PlatformType type) {
-    final filtered = devices.where((d) => getPlatformFromDevice(d) == type);
-    if (filtered.isEmpty) return null;
-
-    final sorted = filtered.toList()
-      ..sort((a, b) {
-        final aTime = a.lastLoginAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-        final bTime = b.lastLoginAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-        return bTime.compareTo(aTime); // descending
-      });
-
-    final device = sorted.first;
-    return device.model?.isNotEmpty == true
-        ? device.model
-        : device.platform?.isNotEmpty == true
-        ? device.platform
-        : 'Unknown';
-  }
-
-  DataRow _buildDataRow(
-    BuildContext context,
-    UserRowModel user,
-    int index,
-    PaginatedDataController<UserRowModel> controllerWatch,
-    PaginatedDataController<UserRowModel> controllerRead,
-  ) {
-    final width = MediaQuery.of(context).size.width;
-    final devices = (user.devices ?? [])
-        .map((e) => DeviceModel.fromMap(e))
-        .toList();
-    final mobileLastLogin = getLastLoginByPlatform(
-      devices,
-      PlatformType.mobile,
-    );
-    final desktopLastLogin = getLastLoginByPlatform(
-      devices,
-      PlatformType.desktop,
-    );
-
-    final mobilePlatformLabel = getPlatformLabelByType(
-      devices,
-      PlatformType.mobile,
-    );
-    final desktopPlatformLabel = getPlatformLabelByType(
-      devices,
-      PlatformType.desktop,
-    );
-
-    final isSelected = controllerWatch.selectedIds.contains(user.uid);
-
-    // String getDepartmentNames(EmployeeModel? employee) {
-    //   if (employee!.department == null || employee.department!.isEmpty) {
-    //     return '';
-    //   }
-
-    //   return employee.department!
-    //       .map((uid) => CacheService.departmentByUid(uid)?.name ?? '')
-    //       .where((name) => name.isNotEmpty)
-    //       .join(', ');
-    // }
-
-    void openUser(BuildContext context, UserRowModel user) {
-      if (kIsMobile || width < 1000) {
-        Sheet.showSheet(
-          context,
-          widget: user.isAdmin
-              ? AdminProfile(admin: user.toAdminModel())
-              : EmployeeDetails(employee: user.toEmployeeModel()),
-        );
-      } else {
-        GeneralDialog.showRTLSheet(
-          context,
-          user.isAdmin
-              ? AdminProfile(admin: user.toAdminModel())
-              : EmployeeDetails(employee: user.toEmployeeModel()),
-        );
-      }
-    }
-
-    DataCell dataCell(BuildContext context, Widget child) {
-      return DataCell(
-        InkWell(
-          onTap: () {
-            openUser(context, user);
-          },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: child,
-          ),
-        ),
-      );
-    }
-
-    return DataRow(
-      selected: isSelected,
-      color: WidgetStateProperty.resolveWith((states) {
-        if (states.contains(WidgetState.selected)) {
-          return Theme.of(context).colorScheme.primary.withValues(alpha: 0.08);
-        }
-        return index.isEven
-            ? Colors.transparent
-            : Theme.of(context).colorScheme.surfaceContainerHighest.withValues(
-                alpha: 0.35,
-              );
-      }),
-      onSelectChanged: (selected) {
-        controllerRead.onSelected(user.uid, selected);
-        if (selected ?? false) {
-          if (!_selectedEmployees.any((e) => e.uid == user.uid)) {
-            _selectedEmployees.add(user);
-            _employeesList.add(user);
+  @override
+  Widget build(BuildContext context) {
+    final current = options[value] ?? allLabel;
+    return SizedBox(
+      width: width,
+      child: CustomSearchableDropdown<String>(
+        key: ValueKey('flt_${allLabel}_${options.length}'),
+        items: [allLabel, ...options.values],
+        initialValue: current,
+        itemAsString: (s) => s,
+        hintText: allLabel,
+        showClearButton: false,
+        height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        onChanged: (label) {
+          if (label == null || label == allLabel) {
+            onChanged('');
+            return;
           }
-        } else {
-          _selectedEmployees.removeWhere((e) => e.uid == user.uid);
-          _employeesList.removeWhere((e) => e.uid == user.uid);
-        }
-        setState(() {});
-      },
-      cells: [
-        /// Employee ID
-        dataCell(
-          context,
+          final key = options.entries
+              .firstWhere(
+                (e) => e.value == label,
+                orElse: () => const MapEntry('', ''),
+              )
+              .key;
+          onChanged(key);
+        },
+      ),
+    );
+  }
+}
+
+/// Blue "8 total" pill showing how many rows pass search + filters.
+class _TotalChip extends StatelessWidget {
+  final int count;
+  const _TotalChip({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Container(
+      height: 32,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: primary.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Iconsax.people, size: 14, color: primary),
+          const SizedBox(width: 6),
           Text(
-            user.employeeId ?? "",
-            style: _primaryCellStyle(context, fontWeight: FontWeight.w500),
+            '$count total',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: primary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Small tinted icon button used in the Action column.
+class _ActionIcon extends StatelessWidget {
+  final String tooltip;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+  final bool circle;
+
+  const _ActionIcon({
+    required this.tooltip,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+    this.circle = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(circle ? 20 : 10);
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: radius,
+        child: InkWell(
+          borderRadius: radius,
+          onTap: onTap,
+          child: SizedBox(
+            width: 32,
+            height: 32,
+            child: Icon(icon, size: 16, color: color),
           ),
         ),
-
-        /// Name + Avatar
-        dataCell(
-          context,
-          Row(
-            children: [
-              UserAvatar(
-                size: 32,
-                showCrown: true,
-                userData: UserDataModel(
-                  uid: user.uid,
-                  name: user.name,
-                  profilePic: user.profileImageUrl,
-                  userType: user.isAdmin ? UserType.admin : UserType.employee,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      user.name,
-                      style: _primaryCellStyle(
-                        context,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if ((CacheService.designationByUid(
-                              user.designation ?? '',
-                            )?.name ??
-                            '')
-                        .isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        CacheService.designationByUid(
-                              user.designation ?? '',
-                            )?.name ??
-                            '',
-                        style: _secondaryCellStyle(context),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        /// Department
-        dataCell(
-          context,
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                user.department != null && user.department!.isNotEmpty
-                    ? user.department!
-                          .map(
-                            (uid) =>
-                                CacheService.departmentByUid(uid)?.name ?? '',
-                          )
-                          .where((name) => name.isNotEmpty)
-                          .join(', ')
-                    : '',
-                style: _primaryCellStyle(context, fontWeight: FontWeight.w500),
-              ),
-
-              if (user.subDepartment != null && user.subDepartment!.isNotEmpty)
-                Text(
-                  CacheService.subDepartmentByUid(user.subDepartment!)?.name ??
-                      '',
-                  style: _secondaryCellStyle(context),
-                ),
-            ],
-          ),
-        ),
-
-        /// Role
-        dataCell(
-          context,
-          Text(
-            CacheService.roleByUid(user.role ?? '')?.name ?? '',
-            style: _primaryCellStyle(context),
-          ),
-        ),
-
-        /// Email
-        dataCell(context, Text(user.email, style: _primaryCellStyle(context))),
-
-        /// Mobile Platform
-        dataCell(
-          context,
-          buildPlatformCell(
-            icon: Icons.phone_android,
-            platformLabel: mobilePlatformLabel,
-            lastLogin: mobileLastLogin,
-          ),
-        ),
-
-        /// Desktop Platform
-        dataCell(
-          context,
-          buildPlatformCell(
-            icon: Icons.desktop_windows,
-            platformLabel: desktopPlatformLabel,
-            lastLogin: desktopLastLogin,
-          ),
-        ),
-
-        /// Status
-        dataCell(
-          context,
-          controllerWatch.paginatedItems.isEmpty
-              ? const NoData(text: "No matching records found")
-              : Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: user.isActive
-                        ? AppColors.success.withValues(alpha: 0.14)
-                        : AppColors.danger.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    user.isActive ? 'Active' : 'Inactive',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: user.isActive
-                          ? AppColors.success
-                          : AppColors.danger,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-        ),
-
-        /// Created By
-        dataCell(context, CreatedByWidget(userData: user.createdBy)),
-
-        /// Actions (no row tap)
-        DataCell(
-          Row(
-            children: [
-              if (permissions?.canEdit ?? false)
-                Tooltip(
-                  message: "Edit",
-                  child: Material(
-                    color: AppColors.info.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(12),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: () {
-                        if (kIsMobile || width < 1000) {
-                          Sheet.showSheet(
-                            context,
-                            widget: EmployeeEdit(
-                              uid: user.uid,
-                              admin: user.isAdmin ? user.toAdminModel() : null,
-                            ),
-                          );
-                        } else {
-                          GeneralDialog.showRTLSheet(
-                            context,
-                            EmployeeEdit(
-                              uid: user.uid,
-                              admin: user.isAdmin ? user.toAdminModel() : null,
-                            ),
-                          );
-                        }
-                      },
-                      child: const Padding(
-                        padding: EdgeInsets.all(9),
-                        child: Icon(Iconsax.edit, size: 17, color: AppColors.info),
-                      ),
-                    ),
-                  ),
-                ),
-              const SizedBox(width: 6),
-              if (!user.isAdmin)
-                if (permissions?.canDelete ?? false)
-                  Tooltip(
-                    message: "Delete",
-                    child: Material(
-                      color: AppColors.danger.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(12),
-                        onTap: () async {
-                          handleDelete(context, user);
-                        },
-                        child: const Padding(
-                          padding: EdgeInsets.all(9),
-                          child: Icon(
-                            Iconsax.trash,
-                            size: 17,
-                            color: AppColors.danger,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-            ],
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
 
 // ---------------------------------------------------------------------
-// A more polished, colorful search field for the Employees toolbar.
+// Search field of the Employees toolbar.
 // ---------------------------------------------------------------------
 class _EmployeeSearchField extends StatefulWidget {
   final ValueChanged<String> onChanged;
-  const _EmployeeSearchField({required this.onChanged});
+
+  /// Fixed width; null = fill the available width.
+  final double? width;
+  const _EmployeeSearchField({required this.onChanged, this.width});
 
   @override
   State<_EmployeeSearchField> createState() => _EmployeeSearchFieldState();
@@ -1756,7 +2318,7 @@ class _EmployeeSearchFieldState extends State<_EmployeeSearchField> {
   void initState() {
     super.initState();
     _focusNode.addListener(() {
-      setState(() => _focused = _focusNode.hasFocus);
+      if (mounted) setState(() => _focused = _focusNode.hasFocus);
     });
   }
 
@@ -1769,29 +2331,20 @@ class _EmployeeSearchFieldState extends State<_EmployeeSearchField> {
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
+    final scheme = Theme.of(context).colorScheme;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 150),
-      height: 46,
-      constraints: const BoxConstraints(maxWidth: 320),
+      width: widget.width,
+      height: 40,
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(4),
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: _focused
-              ? primary.withValues(alpha: 0.55)
-              : Theme.of(context).colorScheme.outlineVariant,
+              ? scheme.primary.withValues(alpha: 0.6)
+              : scheme.outlineVariant,
           width: _focused ? 1.4 : 1,
         ),
-        boxShadow: _focused
-            ? [
-                BoxShadow(
-                  color: primary.withValues(alpha: 0.16),
-                  blurRadius: 10,
-                  offset: const Offset(0, 3),
-                ),
-              ]
-            : null,
       ),
       child: TextField(
         controller: _controller,
@@ -1803,37 +2356,26 @@ class _EmployeeSearchFieldState extends State<_EmployeeSearchField> {
         },
         decoration: InputDecoration(
           isDense: true,
-          hintText: 'Search Employees',
+          hintText: 'Search Employees...',
           hintStyle: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            color: scheme.onSurfaceVariant,
           ),
-          prefixIcon: Padding(
-            padding: const EdgeInsets.all(9),
-            child: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Color(0xFF0052D4), Color(0xFF4364F7)],
-                ),
-                shape: BoxShape.circle,
-              ),
-              child: const Padding(
-                padding: EdgeInsets.all(6.0),
-                child: Icon(
-                  Iconsax.search_normal_1,
-                  size: 12,
-                  color: AppColors.white,
-                ),
-              ),
-            ),
+          prefixIcon: Icon(
+            Icons.search_rounded,
+            size: 18,
+            color: scheme.onSurfaceVariant,
           ),
-          prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+          prefixIconConstraints: const BoxConstraints(
+            minWidth: 38,
+            minHeight: 38,
+          ),
           suffixIcon: _hasText
               ? IconButton(
                   splashRadius: 16,
                   icon: Icon(
                     Icons.close_rounded,
                     size: 16,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    color: scheme.onSurfaceVariant,
                   ),
                   onPressed: () {
                     _controller.clear();
@@ -1842,7 +2384,7 @@ class _EmployeeSearchFieldState extends State<_EmployeeSearchField> {
                   },
                 )
               : null,
-          contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+          contentPadding: const EdgeInsets.symmetric(vertical: 11),
           border: InputBorder.none,
           enabledBorder: InputBorder.none,
           focusedBorder: InputBorder.none,

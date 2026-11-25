@@ -78,6 +78,11 @@ class ApiClient {
   Future<Map<String, String>> _headers({bool json = true, bool auth = true}) async {
     final h = <String, String>{'Accept': 'application/json'};
     if (json) h['Content-Type'] = 'application/json';
+    // Native apps send "Dart/x.y (dart:io)" as User-Agent, so the server cannot
+    // tell Android from Windows in the login log. Tell it explicitly. Not sent
+    // on web: browsers already send a real User-Agent and an unknown custom
+    // header would need a CORS allow-list entry.
+    if (!kIsWeb) h['X-Client-Platform'] = defaultTargetPlatform.name;
     if (auth) {
       final t = await SessionManager.getToken();
       if (t != null && t.isNotEmpty) h['Authorization'] = 'Bearer $t';
