@@ -316,6 +316,36 @@ class TaskService {
     }
   }
 
+  /// Edits the text of one comment (tasks/tickets API action `edit_comment`).
+  static Future<void> editComment({
+    required String taskId,
+    required String commentUid,
+    required String comment,
+  }) async {
+    try {
+      (await TasksApiService.call('edit_comment', {
+        'comment_uid': commentUid,
+        'comment': comment,
+      })).ensureSuccess();
+      ApiLive.changed('task_$taskId');
+    } catch (e, st) {
+      _fail(e, st);
+    }
+  }
+
+  /// Deletes one comment (API action `delete_comment`).
+  static Future<void> deleteComment({
+    required String taskId,
+    required String commentUid,
+  }) async {
+    try {
+      (await TasksApiService.call('delete_comment', {'comment_uid': commentUid})).ensureSuccess();
+      ApiLive.changed('task_$taskId');
+    } catch (e, st) {
+      _fail(e, st);
+    }
+  }
+
   static Future<int> getUserTaskCount({required String userId}) async {
     try {
       return (await getAllTasks()).where((t) => t.assignees.contains(userId)).length;

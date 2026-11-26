@@ -335,21 +335,25 @@ class TaskTimeLogModel {
 }
 
 class TaskCommentModel {
+  String? uid;
   String userId;
   String comment;
   DateTime timestamp;
   TaskCommentModel({
+    this.uid,
     required this.userId,
     required this.comment,
     DateTime? timestamp,
   }) : timestamp = timestamp ?? DateTime.now();
 
   TaskCommentModel copyWith({
+    String? uid,
     String? userId,
     String? comment,
     DateTime? timestamp,
   }) {
     return TaskCommentModel(
+      uid: uid ?? this.uid,
       userId: userId ?? this.userId,
       comment: comment ?? this.comment,
       timestamp: timestamp ?? this.timestamp,
@@ -358,6 +362,7 @@ class TaskCommentModel {
 
   Map<String, dynamic> toMap() {
     return <String, dynamic>{
+      'uid': uid,
       'userId': userId,
       'comment': comment,
       'timestamp': timestamp.millisecondsSinceEpoch,
@@ -366,6 +371,7 @@ class TaskCommentModel {
 
   factory TaskCommentModel.fromMap(Map<String, dynamic> map) {
     return TaskCommentModel(
+      uid: map['uid'] as String?,
       userId: map['userId'] as String,
       comment: map['comment'] as String,
       timestamp: DateTime.fromMillisecondsSinceEpoch(map['timestamp'] as int),
@@ -385,13 +391,14 @@ class TaskCommentModel {
   bool operator ==(covariant TaskCommentModel other) {
     if (identical(this, other)) return true;
 
-    return other.userId == userId &&
+    return other.uid == uid &&
+        other.userId == userId &&
         other.comment == comment &&
         other.timestamp == timestamp;
   }
 
   @override
-  int get hashCode => userId.hashCode ^ comment.hashCode ^ timestamp.hashCode;
+  int get hashCode => (uid?.hashCode ?? 0) ^ userId.hashCode ^ comment.hashCode ^ timestamp.hashCode;
 }
 
 class TaskHistoryModel {

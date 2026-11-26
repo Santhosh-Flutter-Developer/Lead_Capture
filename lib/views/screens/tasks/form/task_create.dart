@@ -33,6 +33,7 @@ class _TaskCreateState extends State<TaskCreate> {
 
   final List<String> _selectedAssignees = [];
   final List<String> _selectedCreatedBy = [];
+  String _createdByLabel = '';
   final List<String> _selectedObservers = [];
   final List<String> _selectedParticipants = [];
 
@@ -75,6 +76,12 @@ class _TaskCreateState extends State<TaskCreate> {
       _projectList = await ProjectService.getAllProjects();
       _employeeList = await EmployeeService.getAllEmployees();
       _taskList = await TaskService.getAllTasks();
+      // "Created By" is always the logged-in user (read-only).
+      final me = await ReadOnlyUserField.loadCurrentUser();
+      _selectedCreatedBy
+        ..clear()
+        ..add(me.uid);
+      _createdByLabel = me.label;
     } catch (e) {
       FlushBar.show(context, e.toString(), isSuccess: false);
     }
@@ -524,13 +531,9 @@ class _TaskCreateState extends State<TaskCreate> {
           },
         ),
         const SizedBox(height: 12),
-        _requiredUsersDropdown(
+        ReadOnlyUserField(
           label: 'Created By',
-          selected: _selectedCreatedBy,
-          onChanged: (list) {
-            _selectedCreatedBy.clear();
-            _selectedCreatedBy.addAll(list.map((e) => e.uid!));
-          },
+          names: _createdByLabel.isEmpty ? const [] : [_createdByLabel],
         ),
       ],
     );

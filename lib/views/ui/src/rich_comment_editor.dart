@@ -67,11 +67,15 @@ class RichCommentEditor extends StatefulWidget {
   final bool isSending;
   final VoidCallback onSend;
 
+  /// false in the edit dialog, where the dialog's own Save button is used.
+  final bool showSendButton;
+
   const RichCommentEditor({
     super.key,
     required this.controller,
     required this.isSending,
     required this.onSend,
+    this.showSendButton = true,
   });
 
   @override
@@ -351,6 +355,7 @@ class _RichCommentEditorState extends State<RichCommentEditor> {
             ),
 
           // ---- footer ----
+          if (widget.showSendButton)
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 0, 8, 8),
             child: Row(
@@ -388,4 +393,125 @@ class _RichCommentEditorState extends State<RichCommentEditor> {
       ),
     );
   }
+}
+
+/// "⋮" menu on a comment: Edit / Delete. Hidden when neither is allowed.
+class CommentActionsMenu extends StatelessWidget {
+  final bool canEdit;
+  final bool canDelete;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const CommentActionsMenu({
+    super.key,
+    required this.canEdit,
+    required this.canDelete,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (!canEdit && !canDelete) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    return PopupMenuButton<String>(
+      tooltip: 'Comment options',
+      padding: EdgeInsets.zero,
+      splashRadius: 16,
+      color: scheme.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      icon: Icon(Iconsax.more, size: 16, color: scheme.primary),
+      onSelected: (v) => v == 'edit' ? onEdit() : onDelete(),
+      itemBuilder: (_) => [
+        if (canEdit)
+          const PopupMenuItem(
+            value: 'edit',
+            child: Row(
+              children: [
+                Icon(Icons.edit, size: 18),
+                SizedBox(width: 8),
+                Text('Edit'),
+              ],
+            ),
+          ),
+        if (canDelete)
+          const PopupMenuItem(
+            value: 'delete',
+            child: Row(
+              children: [
+                Icon(Icons.delete, size: 18, color: Colors.red),
+                SizedBox(width: 8),
+                Text('Delete'),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Edit dialog for a comment. Returns the new text, or null when cancelled /
+/// unchanged.
+Future<String?> showEditCommentDialog(
+  BuildContext context, {
+  required String initialText,
+}) {
+  final controller = TextEditingController(text: initialText);
+  return showDialog<String>(
+    context: context,
+    builder: (ctx) {
+      void save() {
+        final text = controller.text.trim();
+        Navigator.pop(ctx, text.isEmpty || text == initialText.trim() ? null : text);
+      }
+
+      return AlertDialog(
+        title: const Text('Edit comment'),
+        content: SizedBox(
+          width: 520,
+          child: SingleChildScrollView(
+            child: RichCommentEditor(
+              controller: controller,
+              isSending: false,
+              showSendButton: false,
+              onSend: save,
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(onPressed: save, child: const Text('Save')),
+        ],
+      );
+    },
+  ).whenComplete(controller.dispose);
+}
+
+/// Asks for confirmation before deleting a comment.
+Future<bool> confirmDeleteComment(BuildContext context) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Delete Comment'),
+      content: const Text('Are you sure you want to delete this comment?'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Theme.of(ctx).colorScheme.error,
+            foregroundColor: Colors.white,
+          ),
+          child: const Text('Delete'),
+        ),
+      ],
+    ),
+  );
+  return ok ?? false;
 }

@@ -58,6 +58,7 @@ class _TicketCreateState extends State<TicketCreate> {
 
   final List<String> _selectedAssignTo = [];
   final List<String> _selectedCreatedBy = [];
+  String _createdByLabel = '';
   final List<String> _selectedObservers = [];
   final List<String> _selectedParticipants = [];
 
@@ -106,6 +107,12 @@ class _TicketCreateState extends State<TicketCreate> {
       _projectList = await ProjectService.getAllProjects();
       _taskList = await TaskService.getAllTasks();
       _masterClients = await ClientService.getMasterClients();
+      // "Created By" is always the logged-in user (read-only).
+      final me = await ReadOnlyUserField.loadCurrentUser();
+      _selectedCreatedBy
+        ..clear()
+        ..add(me.uid);
+      _createdByLabel = me.label;
     } catch (e) {
       FlushBar.show(context, e.toString(), isSuccess: false);
     }
@@ -653,7 +660,10 @@ class _TicketCreateState extends State<TicketCreate> {
           },
         ),
         const SizedBox(height: 12),
-        _requiredUsersField(label: 'Created By', selected: _selectedCreatedBy),
+        ReadOnlyUserField(
+          label: 'Created By',
+          names: _createdByLabel.isEmpty ? const [] : [_createdByLabel],
+        ),
       ],
     );
   }

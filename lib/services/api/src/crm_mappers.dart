@@ -308,6 +308,7 @@ class CrmMappers {
   }
 
   static TaskCommentModel taskComment(Map<String, dynamic> m) => TaskCommentModel(
+        uid: Js.opt(m['uid'] ?? m['comment_uid'] ?? m['id']),
         userId: Js.s(m['user_uid']),
         comment: Js.s(m['comment']),
         timestamp: Js.dt(m['created_at']),
@@ -400,6 +401,7 @@ class CrmMappers {
   }
 
   static TicketCommentModel ticketComment(Map<String, dynamic> m) => TicketCommentModel(
+        uid: Js.opt(m['uid'] ?? m['comment_uid'] ?? m['id']),
         userId: Js.s(m['user_uid']),
         comment: Js.s(m['comment']),
         timestamp: Js.dt(m['created_at']),

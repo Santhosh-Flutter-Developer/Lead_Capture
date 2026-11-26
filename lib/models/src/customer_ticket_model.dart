@@ -356,21 +356,25 @@ class CustomerTicketModel {
 }
 
 class TicketCommentModel {
+  String? uid;
   String userId;
   String comment;
   DateTime timestamp;
   TicketCommentModel({
+    this.uid,
     required this.userId,
     required this.comment,
     DateTime? timestamp,
   }) : timestamp = timestamp ?? DateTime.now();
 
   TicketCommentModel copyWith({
+    String? uid,
     String? userId,
     String? comment,
     DateTime? timestamp,
   }) {
     return TicketCommentModel(
+      uid: uid ?? this.uid,
       userId: userId ?? this.userId,
       comment: comment ?? this.comment,
       timestamp: timestamp ?? this.timestamp,
@@ -379,6 +383,7 @@ class TicketCommentModel {
 
   Map<String, dynamic> toMap() {
     return <String, dynamic>{
+      'uid': uid,
       'userId': userId,
       'comment': comment,
       'timestamp': timestamp.millisecondsSinceEpoch,
@@ -387,6 +392,7 @@ class TicketCommentModel {
 
   factory TicketCommentModel.fromMap(Map<String, dynamic> map) {
     return TicketCommentModel(
+      uid: map['uid'] as String?,
       userId: map['userId'] as String,
       comment: map['comment'] as String,
       timestamp: DateTime.fromMillisecondsSinceEpoch(map['timestamp'] as int),
@@ -406,13 +412,14 @@ class TicketCommentModel {
   bool operator ==(covariant TicketCommentModel other) {
     if (identical(this, other)) return true;
 
-    return other.userId == userId &&
+    return other.uid == uid &&
+        other.userId == userId &&
         other.comment == comment &&
         other.timestamp == timestamp;
   }
 
   @override
-  int get hashCode => userId.hashCode ^ comment.hashCode ^ timestamp.hashCode;
+  int get hashCode => (uid?.hashCode ?? 0) ^ userId.hashCode ^ comment.hashCode ^ timestamp.hashCode;
 }
 
 class TicketHistoryModel {

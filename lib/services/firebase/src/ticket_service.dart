@@ -230,4 +230,34 @@ class TicketService {
       _fail(e, st);
     }
   }
+
+  /// Edits the text of one comment (tasks/tickets API action `edit_comment`).
+  static Future<void> editComment({
+    required String ticketId,
+    required String commentUid,
+    required String comment,
+  }) async {
+    try {
+      (await TicketsApiService.call('edit_comment', {
+        'comment_uid': commentUid,
+        'comment': comment,
+      })).ensureSuccess();
+      ApiLive.changed('ticket_$ticketId');
+    } catch (e, st) {
+      _fail(e, st);
+    }
+  }
+
+  /// Deletes one comment (API action `delete_comment`).
+  static Future<void> deleteComment({
+    required String ticketId,
+    required String commentUid,
+  }) async {
+    try {
+      (await TicketsApiService.call('delete_comment', {'comment_uid': commentUid})).ensureSuccess();
+      ApiLive.changed('ticket_$ticketId');
+    } catch (e, st) {
+      _fail(e, st);
+    }
+  }
 }

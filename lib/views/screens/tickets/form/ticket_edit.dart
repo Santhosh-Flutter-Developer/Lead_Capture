@@ -752,10 +752,9 @@ class _TicketEditState extends State<TicketEdit> {
           },
         ),
         const SizedBox(height: 12),
-        _requiredUsersField(
+        ReadOnlyUserField(
           label: 'Created By',
-          selected: _selectedCreatedBy,
-          initialValues: _initialCreatedBy,
+          names: [for (final u in _initialCreatedBy) ReadOnlyUserField.labelFor(u)],
         ),
       ],
     );

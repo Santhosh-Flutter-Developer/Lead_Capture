@@ -37,6 +37,7 @@ class _TaskViewState extends State<TaskView> with TickerProviderStateMixin {
   final ScrollController _vhScrollController = ScrollController();
 
   String? currentUid;
+  bool _isAdmin = false;
   String _cid = '';
   Stream<List<TaskCommentModel>>? _commentsStream;
   Stream<List<TaskHistoryModel>>? _historyStream;
@@ -58,6 +59,9 @@ class _TaskViewState extends State<TaskView> with TickerProviderStateMixin {
     }).catchError((_) {});
     _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(_onTabChanged);
+    Spdb.isAdminLoggedIn().then((v) {
+      if (mounted) setState(() => _isAdmin = v);
+    });
     Spdb.getUid().then((uid) {
       if (mounted) setState(() => currentUid = uid);
     });
@@ -96,6 +100,41 @@ class _TaskViewState extends State<TaskView> with TickerProviderStateMixin {
     _vScrollController.dispose();
     _vhScrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _editComment(TaskCommentModel comment) async {
+    if (comment.uid == null) return;
+    final text = await showEditCommentDialog(
+      context,
+      initialText: comment.comment,
+    );
+    if (text == null || !mounted) return;
+    try {
+      await TaskService.editComment(
+        taskId: _taskModel.uid!,
+        commentUid: comment.uid!,
+        comment: text,
+      );
+    } catch (e) {
+      if (mounted) {
+        FlushBar.show(context, 'Failed to edit comment', isSuccess: false);
+      }
+    }
+  }
+
+  Future<void> _deleteComment(TaskCommentModel comment) async {
+    if (comment.uid == null) return;
+    if (!await confirmDeleteComment(context) || !mounted) return;
+    try {
+      await TaskService.deleteComment(
+        taskId: _taskModel.uid!,
+        commentUid: comment.uid!,
+      );
+    } catch (e) {
+      if (mounted) {
+        FlushBar.show(context, 'Failed to delete comment', isSuccess: false);
+      }
+    }
   }
 
   Future<void> _addComment(String taskId) async {
@@ -837,12 +876,36 @@ class _TaskViewState extends State<TaskView> with TickerProviderStateMixin {
                         fontSize: 13,
                       ),
                     ),
-                    Text(
-                      comment.timestamp.listingDateTime,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          comment.timestamp.listingDateTime,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        if (comment.uid != null)
+                          SizedBox(
+                            width: 28,
+                            height: 20,
+                            child: CommentActionsMenu(
+                              // Only the author edits; author or admin deletes.
+                              canEdit:
+                                  currentUid != null &&
+                                  comment.userId == currentUid,
+                              canDelete:
+                                  _isAdmin ||
+                                  (currentUid != null &&
+                                      comment.userId == currentUid),
+                              onEdit: () => _editComment(comment),
+                              onDelete: () => _deleteComment(comment),
+                            ),
+                          ),
+                      ],
                     ),
                   ],
                 ),

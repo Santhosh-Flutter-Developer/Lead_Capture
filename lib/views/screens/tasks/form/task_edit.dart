@@ -602,14 +602,9 @@ class _TaskEditState extends State<TaskEdit> {
           },
         ),
         const SizedBox(height: 12),
-        _requiredUsersDropdown(
+        ReadOnlyUserField(
           label: 'Created By',
-          initialValues: _initialCreatedBy,
-          selected: _selectedCreatedBy,
-          onChanged: (list) {
-            _selectedCreatedBy.clear();
-            _selectedCreatedBy.addAll(list.map((e) => e.uid!));
-          },
+          names: [for (final u in _initialCreatedBy) ReadOnlyUserField.labelFor(u)],
         ),
       ],
     );
