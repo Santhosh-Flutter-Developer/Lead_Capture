@@ -8,6 +8,7 @@ class AdminService {
     ErrorService.recordError(e, st);
     debugPrint('$e, $st');
     if (e is ApiException) throw e.message;
+    if (e is String) throw e; // already a user-facing message
     throw '$prefix: $e';
   }
 
@@ -30,6 +31,8 @@ class AdminService {
 
   static Future<void> createAdmin({required AdminModel admin}) async {
     try {
+      final dup = await EmployeeService.checkEmailGlobally(admin.email);
+      if (dup != null) throw dup;
       final body = <String, dynamic>{
         'employee_id': await _nextAdminCode(),
         'name': admin.name,
@@ -55,9 +58,14 @@ class AdminService {
     }
   }
 
+  /// Saves an admin. [convertFromEmployee] = true promotes an existing
+  /// EMPLOYEE record to admin (server `make_as_admin`); its stored work data
+  /// (designation, department, dates ...) is kept so a later demotion can
+  /// restore it, and the role is cleared so the server assigns the admin role.
   static Future<void> updateAdmin({
     required String id,
     required AdminModel data,
+    bool convertFromEmployee = false,
   }) async {
     try {
       final cur = await EmployeesApiService.get(id);
@@ -66,9 +74,15 @@ class AdminService {
         await createAdmin(admin: data);
         return;
       }
+      final newEmail = data.email.trim().toLowerCase();
+      final oldEmail = Js.s(cur.dataMap['email']).trim().toLowerCase();
+      if (newEmail != oldEmail) {
+        final dup = await EmployeeService.checkEmailGlobally(newEmail, excludeUid: id);
+        if (dup != null) throw dup;
+      }
       final body = ApiMappers.rowToUpdateBody(cur.dataMap, overrides: {
         'name': data.name,
-        'email': data.email.trim().toLowerCase(),
+        'email': newEmail,
         'mobile_number': data.mobileNumber,
         'skills': data.skills ?? '',
         'about': data.about ?? '',
@@ -78,12 +92,14 @@ class AdminService {
         'login_allowed': (data.loginAllowed ?? true) ? 1 : 0,
         'receive_email_notifications': (data.receiveEmailNotifications ?? true) ? 1 : 0,
         'outside_office': (data.outsideOffice ?? false) ? 1 : 0,
+        'make_as_admin': 1,
+        if (convertFromEmployee) 'role_id': null,
         if (data.password.isNotEmpty) 'password': data.password,
         if (data.profileImageUrl != null && data.profileImageUrl!.isNotEmpty)
           'profile_image_url': ApiConfig.toRelativePath(data.profileImageUrl),
       });
       (await EmployeesApiService.update(id, body)).ensureSuccess();
-      ApiLive.changed('admin');
+      ApiLive.changed(convertFromEmployee ? {'admin', 'employee', 'role'} : 'admin');
     } catch (e, st) {
       _fail('Error updating admin', e, st);
     }

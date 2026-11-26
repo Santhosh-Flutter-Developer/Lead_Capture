@@ -419,6 +419,11 @@ class ApiMappers {
       'login_allowed': Js.b(row['login_allowed'], true) ? 1 : 0,
       'receive_email_notifications': Js.b(row['receive_email_notifications']) ? 1 : 0,
       'outside_office': Js.b(row['outside_office']) ? 1 : 0,
+      // employees.php `update` derives user_type from make_as_admin, so it
+      // MUST be resent or every admin edit silently demotes the user.
+      'make_as_admin': isAdminRow(row) ? 1 : 0,
+      // Resend so the update never wipes the reporting structure.
+      'reporting_to': Js.strList(row['reporting_to']),
     };
     final img = profileImage ?? Js.opt(row['profile_image_url']);
     if (img != null) body['profile_image_url'] = ApiConfig.toRelativePath(img);

@@ -14,7 +14,8 @@ import '/theme/theme.dart';
 const double _wideBreakpoint = 900;
 
 /// Master Company list: company details (logo, GST/VAT, address) with its
-/// primary contact. Create / edit / delete / export / view follow the role.
+/// primary contact. This screen is read-only: listing, search, filters,
+/// export and view only (no create / edit / delete).
 class MasterCompanyListing extends StatefulWidget {
   const MasterCompanyListing({super.key});
 
@@ -251,14 +252,13 @@ class _MasterCompanyListingState extends State<MasterCompanyListing> {
       !kIsMobile && MediaQuery.of(context).size.width >= _wideBreakpoint;
 
   Future<void> _openView(BuildContext context, MasterCompanyModel c) async {
-    final r = await RecordViewSheet.show(
+    await RecordViewSheet.show(
       context,
       RecordViewSheet(
         title: c.companyName,
         subtitle: c.contactName,
         icon: Icons.apartment_rounded,
-        canEdit: _permissions?.canEdit ?? false,
-        editLabel: 'Edit Company',
+        canEdit: false,
         sections: [
           RecordViewSection('Company Details', [
             RecordViewField('Company', c.companyName),
@@ -279,18 +279,6 @@ class _MasterCompanyListingState extends State<MasterCompanyListing> {
         ],
       ),
     );
-    if (r == 'edit' && context.mounted) _openForm(context, uid: c.uid);
-  }
-
-  Future<void> _openForm(BuildContext context, {String? uid}) async {
-    final form = MasterCompanyForm(uid: uid);
-    dynamic val;
-    if (_isWide(context)) {
-      val = await GeneralDialog.showRTLSheet(context, form);
-    } else {
-      val = await Sheet.showSheet(context, widget: form);
-    }
-    if (val is Map && val['status'] == true) await _load();
   }
 
   @override
@@ -435,27 +423,13 @@ class _MasterCompanyListingState extends State<MasterCompanyListing> {
     PaginatedDataController<MasterCompanyModel> controller,
     bool isWide,
   ) {
-    final selected = controller.selectedIds.length;
     final buttons = <Widget>[
-      if (_permissions?.canCreate ?? false)
-        FilledButton.icon(
-          onPressed: () => _openForm(context),
-          icon: const Icon(Icons.add_rounded, size: 18),
-          label: const Text('Add Our Company'),
-        ),
       if ((_permissions?.canExport ?? false) &&
           controller.paginatedItems.isNotEmpty)
         OutlinedButton.icon(
           onPressed: () => _export(context, controller),
           icon: const Icon(Iconsax.export_3, size: 18),
           label: const Text('Export'),
-        ),
-      if (selected > 0 && (_permissions?.canDelete ?? false))
-        FilledButton.icon(
-          style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-          onPressed: () => _bulkDelete(context, controller),
-          icon: const Icon(Iconsax.trash, size: 18),
-          label: Text('Delete ($selected)'),
         ),
       IconButton(
         tooltip: 'Refresh',
@@ -610,7 +584,7 @@ class _MasterCompanyListingState extends State<MasterCompanyListing> {
                   child: ConstrainedBox(
                     constraints: BoxConstraints(minWidth: constraints.maxWidth),
                     child: DataTable(
-                      showCheckboxColumn: true,
+                      showCheckboxColumn: false,
                       sortColumnIndex: controller.sortColumnIndex,
                       sortAscending: controller.sortAscending,
                       headingRowColor: WidgetStateProperty.all(
@@ -687,8 +661,6 @@ class _MasterCompanyListingState extends State<MasterCompanyListing> {
   ) {
     final style = Theme.of(context).textTheme.bodySmall;
     return DataRow(
-      selected: controller.selectedIds.contains(c.uid),
-      onSelectChanged: (v) => controller.onSelected(c.uid!, v),
       cells: [
         DataCell(
           Row(
@@ -718,9 +690,6 @@ class _MasterCompanyListingState extends State<MasterCompanyListing> {
               ),
             ],
           ),
-          onTap: (_permissions?.canEdit ?? false)
-              ? () => _openForm(context, uid: c.uid)
-              : null,
         ),
         DataCell(Text(c.contactName.isNotEmpty ? c.contactName : '-', style: style)),
         DataCell(Text(c.mobileNumber.isNotEmpty ? c.mobileNumber : '-', style: style)),
@@ -756,20 +725,6 @@ class _MasterCompanyListingState extends State<MasterCompanyListing> {
                   color: Theme.of(context).colorScheme.primary,
                   icon: const Icon(Iconsax.eye),
                   onPressed: () => _openView(context, c),
-                ),
-              if (_permissions?.canEdit ?? false)
-                IconButton(
-                  tooltip: 'Edit',
-                  color: AppColors.info,
-                  icon: const Icon(Iconsax.edit),
-                  onPressed: () => _openForm(context, uid: c.uid),
-                ),
-              if (_permissions?.canDelete ?? false)
-                IconButton(
-                  tooltip: 'Delete',
-                  color: AppColors.danger,
-                  icon: const Icon(Iconsax.trash),
-                  onPressed: () => _delete(context, c),
                 ),
             ],
           ),
@@ -823,87 +778,6 @@ class _MasterCompanyListingState extends State<MasterCompanyListing> {
     } catch (e) {
       if (!context.mounted) return;
       FlushBar.show(context, e.toString(), isSuccess: false);
-    }
-  }
-
-  Future<bool> _confirmDelete(BuildContext context, int count) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => ConfirmDialog(
-        title: 'Delete Our Company',
-        content: count == 1
-            ? 'Are you sure you want to delete this company?'
-            : 'Are you sure you want to delete $count companies?',
-      ),
-    );
-    return ok == true;
-  }
-
-  Future<void> _delete(BuildContext context, MasterCompanyModel c) async {
-    if (!context.mounted || !await _confirmDelete(context, 1)) return;
-    try {
-      final deleted = c.copyWith();
-      futureLoading(context);
-      try {
-        await MasterCompanyService.delete(uid: c.uid ?? '');
-      } finally {
-        if (context.mounted && Navigator.canPop(context)) Navigator.pop(context);
-      }
-      await _load();
-      if (!context.mounted) return;
-      FlushBar.show(
-        context,
-        'Company deleted',
-        actionLabel: 'UNDO',
-        onActionPressed: () async {
-          await MasterCompanyService.restore(deleted);
-          await _load();
-        },
-      );
-    } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      if (context.mounted) FlushBar.show(context, '$e', isSuccess: false);
-    }
-  }
-
-  Future<void> _bulkDelete(
-    BuildContext context,
-    PaginatedDataController<MasterCompanyModel> controller,
-  ) async {
-    final chosen = _all
-        .where((c) => controller.selectedIds.contains(c.uid))
-        .toList();
-    if (chosen.isEmpty) return;
-    if (!context.mounted || !await _confirmDelete(context, chosen.length)) {
-      return;
-    }
-    try {
-      final deleted = chosen.map((e) => e.copyWith()).toList();
-      futureLoading(context);
-      try {
-        for (final c in chosen) {
-          await MasterCompanyService.delete(uid: c.uid ?? '');
-        }
-      } finally {
-        if (context.mounted && Navigator.canPop(context)) Navigator.pop(context);
-      }
-      controller.clearSelection();
-      await _load();
-      if (!context.mounted) return;
-      FlushBar.show(
-        context,
-        'Companies deleted',
-        actionLabel: 'UNDO',
-        onActionPressed: () async {
-          for (final c in deleted) {
-            await MasterCompanyService.restore(c);
-          }
-          await _load();
-        },
-      );
-    } catch (e, st) {
-      await ErrorService.recordError(e, st);
-      if (context.mounted) FlushBar.show(context, '$e', isSuccess: false);
     }
   }
 }
