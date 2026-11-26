@@ -176,6 +176,198 @@ class _PaymentListingState extends State<PaymentListing> {
   bool _isWide(BuildContext context) =>
       !kIsMobile && MediaQuery.of(context).size.width >= _wideBreakpoint;
 
+  Future<void> _openView(BuildContext context, PaymentGroup c) async {
+    final scheme = Theme.of(context).colorScheme;
+    final total = c.totalValue;
+    final pct = total <= 0 ? 0.0 : (c.allocatedValue / total).clamp(0.0, 1.0);
+    final r = await RecordViewSheet.show(
+      context,
+      RecordViewSheet(
+        title: c.projectName.isNotEmpty ? c.projectName : 'Payment',
+        subtitle: c.clientLabel,
+        icon: Iconsax.wallet_3,
+        canEdit: _permissions?.canEdit ?? false,
+        editLabel: 'Edit Payments',
+        summary: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF0052D4), Color(0xFF4364F7)],
+            ),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'DEAL ALLOCATION STATUS',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _money.format(c.allocatedValue),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Text(
+                      '${(pct * 100).round()}% Paid',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF1D4ED8),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Allocated of ${_money.format(total)} Deal Value',
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+              ),
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: LinearProgressIndicator(
+                  value: pct,
+                  minHeight: 6,
+                  backgroundColor: Colors.white.withValues(alpha: 0.25),
+                  color: const Color(0xFF22C55E),
+                ),
+              ),
+            ],
+          ),
+        ),
+        extra: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Payment Allocations',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '${c.lines.length} Allocation(s)',
+                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          for (final l in c.lines)
+            Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: scheme.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: scheme.outlineVariant),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: [
+                            _viewChip(l.companyName, scheme.primary),
+                            _viewChip(l.paymentMode, scheme.onSurfaceVariant),
+                            if ((l.upiNumber ?? '').isNotEmpty)
+                              _viewChip('UPI ${l.upiNumber}', scheme.onSurfaceVariant),
+                          ],
+                        ),
+                      ),
+                      Text(
+                        _money.format(l.allocatedValue),
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: scheme.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if ((l.updationLabel ?? '').isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Project Updation: ${l.updationLabel}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          l.createdBy.name,
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                      ),
+                      Text(
+                        DateFormat('dd MMM yyyy').format(l.createdAt),
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+    if (r == 'edit' && context.mounted) _openForm(context, uid: c.first.uid);
+  }
+
+  Widget _viewChip(String text, Color color) {
+    if (text.trim().isEmpty) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          color: color,
+        ),
+      ),
+    );
+  }
+
   Future<void> _openForm(BuildContext context, {String? uid}) async {
     final form = PaymentForm(uid: uid);
     dynamic val;
@@ -781,6 +973,13 @@ class _PaymentListingState extends State<PaymentListing> {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (_permissions?.canView ?? false)
+                IconButton(
+                  tooltip: 'View',
+                  color: Theme.of(context).colorScheme.primary,
+                  icon: const Icon(Iconsax.eye),
+                  onPressed: () => _openView(context, c),
+                ),
               if (_permissions?.canEdit ?? false)
                 IconButton(
                   tooltip: 'Edit',

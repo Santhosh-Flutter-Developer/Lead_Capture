@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:iconsax/iconsax.dart';
 import 'package:provider/provider.dart';
@@ -965,6 +966,19 @@ class _ProjectsListingViewState extends State<ProjectsListingView> {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (permissions?.canView ?? false) ...[
+                _iconCircleButton(
+                  context,
+                  icon: Iconsax.eye,
+                  tooltip: "View",
+                  background: Theme.of(
+                    context,
+                  ).colorScheme.primary.withValues(alpha: 0.12),
+                  iconColor: Theme.of(context).colorScheme.primary,
+                  onPressed: () => _onViewTap(project),
+                ),
+                const SizedBox(width: 8),
+              ],
               if (permissions?.canEdit ?? false) _iconCircleButton(
                       context,
                       icon: Iconsax.edit,
@@ -993,6 +1007,42 @@ class _ProjectsListingViewState extends State<ProjectsListingView> {
   // ---------------------------------------------------------------------
   // Actions
   // ---------------------------------------------------------------------
+  Future<void> _onViewTap(ProjectModel project) async {
+    String d(DateTime? v) =>
+        v == null ? '' : DateFormat('dd MMM yyyy').format(v);
+    final members = project.members
+        .map((uid) => CacheService.getUserByUid(uid)?.name ?? '')
+        .where((n) => n.isNotEmpty)
+        .join(', ');
+    final r = await RecordViewSheet.show(
+      context,
+      RecordViewSheet(
+        title: project.projectName,
+        subtitle: project.client ?? '',
+        icon: Iconsax.briefcase,
+        badge: (project.projectCode ?? '').isNotEmpty ? project.projectCode : null,
+        canEdit: permissions?.canEdit ?? false,
+        editLabel: 'Edit Project',
+        sections: [
+          RecordViewSection('Project Details', [
+            RecordViewField('Project Owner', project.projectOwnerName),
+            RecordViewField('Team Lead', project.teamLeadName),
+            RecordViewField('Client', project.client ?? ''),
+            RecordViewField('Category', project.category ?? ''),
+            RecordViewField('Start Date', d(project.startDate)),
+            RecordViewField('End Date', d(project.endDate)),
+            RecordViewField('Deadline', d(project.deadline)),
+            RecordViewField('Tags', project.tags ?? ''),
+            RecordViewField('Members', members),
+            RecordViewField('Created By', project.createdBy.name),
+            RecordViewField('Description', project.projectDescription),
+          ]),
+        ],
+      ),
+    );
+    if (r == 'edit' && mounted) _onEditTap(project);
+  }
+
   void _onEditTap(ProjectModel project) {
     final isWide = _isWide(context);
     if (!isWide) {

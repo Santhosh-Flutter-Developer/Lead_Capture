@@ -1118,6 +1118,19 @@ class _TicketListingViewState extends State<TicketListingView> {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (permissions?.canView ?? false) ...[
+                _iconCircleButton(
+                  context,
+                  icon: Iconsax.eye,
+                  tooltip: "View",
+                  background: Theme.of(
+                    context,
+                  ).colorScheme.primary.withValues(alpha: 0.12),
+                  iconColor: Theme.of(context).colorScheme.primary,
+                  onPressed: () => openTicket(context, ticket.uid ?? ''),
+                ),
+                const SizedBox(width: 8),
+              ],
               if ((permissions?.canEdit ?? false) && !ticket.isCancelled)
                 _iconCircleButton(
                   context,

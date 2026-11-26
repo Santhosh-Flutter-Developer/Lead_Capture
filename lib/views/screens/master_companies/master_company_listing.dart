@@ -250,6 +250,38 @@ class _MasterCompanyListingState extends State<MasterCompanyListing> {
   bool _isWide(BuildContext context) =>
       !kIsMobile && MediaQuery.of(context).size.width >= _wideBreakpoint;
 
+  Future<void> _openView(BuildContext context, MasterCompanyModel c) async {
+    final r = await RecordViewSheet.show(
+      context,
+      RecordViewSheet(
+        title: c.companyName,
+        subtitle: c.contactName,
+        icon: Icons.apartment_rounded,
+        canEdit: _permissions?.canEdit ?? false,
+        editLabel: 'Edit Company',
+        sections: [
+          RecordViewSection('Company Details', [
+            RecordViewField('Company', c.companyName),
+            RecordViewField('Contact Name', c.contactName),
+            RecordViewField('Mobile', c.mobileNumber),
+            RecordViewField('Email', c.email ?? ''),
+            RecordViewField('GST / VAT', c.gstVatNumber ?? ''),
+            RecordViewField('Created By', c.createdBy.name),
+          ]),
+          RecordViewSection('Address', [
+            RecordViewField('Address', c.companyAddress ?? ''),
+            RecordViewField('Country', c.country?.name ?? ''),
+            RecordViewField('State', c.state?.name ?? ''),
+            RecordViewField('District', c.district?.name ?? ''),
+            RecordViewField('City', c.city?.name ?? ''),
+            RecordViewField('Postal Code', c.postalCode ?? ''),
+          ]),
+        ],
+      ),
+    );
+    if (r == 'edit' && context.mounted) _openForm(context, uid: c.uid);
+  }
+
   Future<void> _openForm(BuildContext context, {String? uid}) async {
     final form = MasterCompanyForm(uid: uid);
     dynamic val;
@@ -345,7 +377,7 @@ class _MasterCompanyListingState extends State<MasterCompanyListing> {
               color: AppColors.white.withValues(alpha: 0.18),
               borderRadius: BorderRadius.circular(16),
             ),
-            child: const Icon(Iconsax.building_4, color: AppColors.white, size: 30),
+            child: const Icon(Icons.apartment_rounded, color: AppColors.white, size: 30),
           ),
           const SizedBox(width: 18),
           Expanded(
@@ -718,6 +750,13 @@ class _MasterCompanyListingState extends State<MasterCompanyListing> {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (_permissions?.canView ?? false)
+                IconButton(
+                  tooltip: 'View',
+                  color: Theme.of(context).colorScheme.primary,
+                  icon: const Icon(Iconsax.eye),
+                  onPressed: () => _openView(context, c),
+                ),
               if (_permissions?.canEdit ?? false)
                 IconButton(
                   tooltip: 'Edit',

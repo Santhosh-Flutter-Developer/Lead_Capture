@@ -1226,6 +1226,19 @@ class _TaskListingViewState extends State<TaskListingView> {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (permissions?.canView ?? false) ...[
+                _iconCircleButton(
+                  context,
+                  icon: Iconsax.eye,
+                  tooltip: "View",
+                  background: Theme.of(
+                    context,
+                  ).colorScheme.primary.withValues(alpha: 0.12),
+                  iconColor: Theme.of(context).colorScheme.primary,
+                  onPressed: () => openTask(context, task.uid ?? ''),
+                ),
+                const SizedBox(width: 8),
+              ],
               if ((permissions?.canEdit ?? false) && !task.isCancelled)
                 _iconCircleButton(
                   context,

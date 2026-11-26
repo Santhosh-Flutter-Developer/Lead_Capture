@@ -341,6 +341,46 @@ class _ProjectUpdationListingState extends State<ProjectUpdationListing> {
     if (mounted) _applyFilters();
   }
 
+  Future<void> _openView(ProjectUpdationModel u) async {
+    final r = await RecordViewSheet.show(
+      context,
+      RecordViewSheet(
+        title: u.title,
+        subtitle: u.projectName,
+        icon: Icons.update_rounded,
+        badge: u.updationNumber != null
+            ? 'UPD-${u.updationNumber.toString().padLeft(4, '0')}'
+            : null,
+        canEdit: _canEdit && !u.isCancelled,
+        editLabel: 'Edit $_pageTitle',
+        sections: [
+          RecordViewSection('Updation Details', [
+            RecordViewField('Status', u.isCancelled ? 'Cancelled' : u.status.label),
+            RecordViewField('Requested Date', _dateFmt.format(u.requestedDate)),
+            RecordViewField(
+              'Deadline',
+              u.deadline == null ? '' : _dateFmt.format(u.deadline!),
+            ),
+            RecordViewField('Value', u.value?.toStringAsFixed(2) ?? ''),
+            RecordViewField('Assignee', u.assigneeName ?? ''),
+            RecordViewField('Created By', u.createdBy.name),
+            RecordViewField('Description', u.description),
+            RecordViewField('Note', u.notes),
+            if (u.isCancelled)
+              RecordViewField('Cancel Remarks', u.cancelRemarks),
+          ]),
+          RecordViewSection('Client', [
+            RecordViewField('Company', u.companyName ?? ''),
+            RecordViewField('Contact Name', u.contactName ?? ''),
+            RecordViewField('Contact Mobile', u.contactMobile ?? ''),
+            RecordViewField('Project', u.projectName),
+          ]),
+        ],
+      ),
+    );
+    if (r == 'edit' && mounted) _openForm(uid: u.uid);
+  }
+
   void _openItem(ProjectUpdationModel u) {
     if (_canEdit) _openForm(uid: u.uid);
   }
@@ -1285,6 +1325,14 @@ class _ProjectUpdationListingState extends State<ProjectUpdationListing> {
         DataCell(
           Row(
             children: [
+              if (_permissions?.canView ?? false)
+                IconButton(
+                  icon: const Icon(Iconsax.eye),
+                  tooltip: 'View $_pageTitle',
+                  color: Theme.of(context).colorScheme.primary,
+                  splashRadius: 20,
+                  onPressed: () => _openView(u),
+                ),
               if (_canEdit && !u.isCancelled)
                 IconButton(
                   icon: const Icon(Iconsax.edit),

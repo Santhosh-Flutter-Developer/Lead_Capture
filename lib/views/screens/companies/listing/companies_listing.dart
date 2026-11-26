@@ -1378,6 +1378,20 @@ class _CompanyListingViewState extends State<CompanyListingView> {
     return Row(
 
       children: [
+        if (permissions?.canView ?? false)
+          IconButton(
+            icon: const Icon(Iconsax.eye),
+            tooltip: 'View',
+            color: Theme.of(context).colorScheme.primary,
+            splashRadius: 20,
+            onPressed: () {
+              final profile = CompanyProfile(company: company);
+              kIsMobile
+                  ? Sheet.showSheet(context, widget: profile)
+                  : GeneralDialog.showRTLSheet(context, profile);
+            },
+          ),
+
 
         if (permissions?.canEdit ?? false) ...[
 
@@ -1530,4 +1544,3 @@ class _CompanyListingViewState extends State<CompanyListingView> {
   }
 
 }
-

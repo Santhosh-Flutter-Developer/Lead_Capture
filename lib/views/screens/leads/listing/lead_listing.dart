@@ -1020,7 +1020,9 @@ class _LeadsListingViewState extends State<LeadsListingView> {
   Widget _rowActions(LeadModel lead) {
     return Row(
       children: [
-        _iconAction(Iconsax.eye, _blue, 'View', () => _openLead(lead)),
+        // Role based: View (eye) only for users with View permission.
+        if (permissions?.canView ?? false)
+          _iconAction(Iconsax.eye, _blue, 'View', () => _openLead(lead)),
         if (lead.leadsConverted)
           InkWell(
             onTap: () => _openDeal(lead),

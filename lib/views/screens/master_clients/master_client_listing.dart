@@ -295,6 +295,43 @@ class _MasterClientListingState extends State<MasterClientListing> {
   bool _isWide(BuildContext context) =>
       !kIsMobile && MediaQuery.of(context).size.width >= _wideBreakpoint;
 
+  Future<void> _openView(BuildContext context, ClientModel c) async {
+    final s = _statsOf(c);
+    final r = await RecordViewSheet.show(
+      context,
+      RecordViewSheet(
+        title: c.companyName ?? 'Master Client',
+        subtitle: c.clientName ?? '',
+        icon: Icons.groups_rounded,
+        canEdit: _permissions?.canEdit ?? false,
+        editLabel: 'Edit Master Client',
+        sections: [
+          RecordViewSection('Client Details', [
+            RecordViewField('Company', c.companyName ?? ''),
+            RecordViewField('Client Name', c.clientName ?? ''),
+            RecordViewField('Mobile', c.mobileNumber ?? ''),
+            RecordViewField('Lead Category', c.clientCategoryName ?? ''),
+            RecordViewField('Created By', c.createdBy.name),
+          ]),
+          RecordViewSection('Address', [
+            RecordViewField('Address', c.companyAddress ?? ''),
+            RecordViewField('Country', c.country?.name ?? ''),
+            RecordViewField('State', c.state?.name ?? ''),
+            RecordViewField('District', c.district?.name ?? ''),
+            RecordViewField('City', c.city?.name ?? ''),
+            RecordViewField('Postal Code', c.postalCode ?? ''),
+          ]),
+          RecordViewSection('Activity', [
+            RecordViewField('Leads', '${s.leads}'),
+            RecordViewField('Deals', '${s.deals}'),
+            RecordViewField('Value', s.value.toStringAsFixed(2)),
+          ]),
+        ],
+      ),
+    );
+    if (r == 'edit' && context.mounted) _openForm(context, uid: c.uid);
+  }
+
   Future<void> _openForm(BuildContext context, {String? uid}) async {
     final form = MasterClientForm(uid: uid);
     dynamic val;
@@ -828,6 +865,13 @@ class _MasterClientListingState extends State<MasterClientListing> {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (_permissions?.canView ?? false)
+                IconButton(
+                  tooltip: 'View',
+                  color: Theme.of(context).colorScheme.primary,
+                  icon: const Icon(Iconsax.eye),
+                  onPressed: () => _openView(context, c),
+                ),
               if (_permissions?.canEdit ?? false)
                 IconButton(
                   tooltip: 'Edit',

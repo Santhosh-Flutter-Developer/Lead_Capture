@@ -1649,6 +1649,15 @@ class _DealsListingViewState extends State<DealsListingView> {
         DataCell(
           Row(
             children: [
+              // Role based: View (eye) only for users with View permission.
+              if (permissions?.canView ?? false)
+                IconButton(
+                  icon: const Icon(Iconsax.eye),
+                  tooltip: 'View Deal',
+                  color: Theme.of(context).colorScheme.primary,
+                  splashRadius: 20,
+                  onPressed: () => openDeal(context, deal),
+                ),
               if (deal.isLocked)
                 IconButton(
                   icon: const Icon(Iconsax.lock),
