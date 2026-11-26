@@ -11,7 +11,14 @@ class DealsTimelineChart extends StatelessWidget {
   /// The list of deals to be visualized.
   final List<DealModel> deals;
 
-  const DealsTimelineChart({super.key, required this.deals});
+  /// When false (inside the Deals screen) tapping the card does nothing.
+  final bool navigateOnTap;
+
+  const DealsTimelineChart({
+    super.key,
+    required this.deals,
+    this.navigateOnTap = true,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -49,13 +56,15 @@ class DealsTimelineChart extends StatelessWidget {
     final bool isLight = theme.brightness == Brightness.light;
 
     return GestureDetector(
-      onTap: () {
-        if (kIsMobile || width < 1000) {
-          Sheet.showSheet(context, widget: const DealsListing());
-        } else {
-          GeneralDialog.showRTLSheet(context, const DealsListing());
-        }
-      },
+      onTap: !navigateOnTap
+          ? null
+          : () {
+              if (kIsMobile || width < 1000) {
+                Sheet.showSheet(context, widget: const DealsListing());
+              } else {
+                GeneralDialog.showRTLSheet(context, const DealsListing());
+              }
+            },
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(

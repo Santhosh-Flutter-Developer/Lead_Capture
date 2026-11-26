@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -10,6 +11,12 @@ import '/utils/utils.dart';
 import '/theme/theme.dart';
 import '/models/models.dart';
 import '/services/services.dart';
+import '/utils/src/download_io.dart'
+    if (dart.library.html) '/utils/src/download_web.dart'
+    show saveFileToDownloads;
+import 'deals_export.dart';
+import 'deals_status_graph.dart';
+import 'deals_timeline_chart.dart';
 
 /// Layout is decided by the available CONTENT width (not the platform), so the
 /// web build, narrow desktop windows and phones all get the compact layout.
@@ -97,6 +104,8 @@ class _DealsListingViewState extends State<DealsListingView> {
 
   String? _selectedStatus;
   String? _selectedCreatedBy;
+  String? _selectedFollowUp; // follow-up staff uid
+  bool _exporting = false;
   String? _selectedClient; // master client uid
   String? _selectedSource;
   String? _selectedProject;
@@ -225,6 +234,7 @@ class _DealsListingViewState extends State<DealsListingView> {
       _toDate = null;
       _selectedStatus = null;
       _selectedCreatedBy = null;
+      _selectedFollowUp = null;
       _selectedClient = null;
       _selectedSource = null;
       _selectedProject = null;
@@ -319,8 +329,23 @@ class _DealsListingViewState extends State<DealsListingView> {
                         _buildSelectionBar(controllerWatch, controllerRead),
                       ],
                       const SizedBox(height: 18),
-                      if (controllerWatch.paginatedItems.isEmpty)
+                      if (_selectedView == 'StatusGraph')
+                        DealsStatusGraph(
+                          onViewDeals: (uid) {
+                            setState(() {
+                              _selectedFollowUp = uid;
+                              _selectedView = 'List';
+                            });
+                            _applyFilters();
+                          },
+                        )
+                      else if (controllerWatch.paginatedItems.isEmpty)
                         const NoData(text: "No matching records found")
+                      else if (_selectedView == 'Timeline')
+                        DealsTimelineChart(
+                          deals: _filteredDeals,
+                          navigateOnTap: false,
+                        )
                       else if (_selectedView == 'Grid') ...[
                         DealKanbanListing(
                           dealList: _filteredDeals,
@@ -430,6 +455,8 @@ class _DealsListingViewState extends State<DealsListingView> {
                           : null,
                       columnSpacing: 12,
                       horizontalMargin: 8,
+                      dataRowMinHeight: 72,
+                      dataRowMaxHeight: 88,
                       sortColumnIndex: controllerWatch.sortColumnIndex,
                       sortAscending: controllerWatch.sortAscending,
                       headingRowColor: WidgetStateProperty.all(
@@ -693,6 +720,32 @@ class _DealsListingViewState extends State<DealsListingView> {
 
               setState(() => _selectedCreatedBy = selectedEmployee?.uid);
 
+              _applyFilters();
+            },
+          ),
+
+          /// Follow-up Staff
+          _filterDropdown(
+            label: "Follow-up Staff",
+            value: _selectedFollowUp != null
+                ? cache
+                      .getAllListenableEmployees()
+                      .value
+                      .firstWhereOrNull((e) => e.uid == _selectedFollowUp)
+                      ?.name
+                : 'All',
+            items: employeeItems(cache),
+            onChanged: (v) {
+              if (v == null || v == 'All') {
+                setState(() => _selectedFollowUp = null);
+                _applyFilters();
+                return;
+              }
+              final emp = cache
+                  .getAllListenableEmployees()
+                  .value
+                  .firstWhereOrNull((e) => e.name == v);
+              setState(() => _selectedFollowUp = emp?.uid);
               _applyFilters();
             },
           ),
@@ -1146,6 +1199,12 @@ class _DealsListingViewState extends State<DealsListingView> {
           .toList();
     }
 
+    if (_selectedFollowUp != null) {
+      filtered = filtered
+          .where((e) => e.followUp == _selectedFollowUp)
+          .toList();
+    }
+
     if (_selectedClient != null) {
       filtered = filtered.where((e) {
         if ((e.clientId ?? '').isNotEmpty) return e.clientId == _selectedClient;
@@ -1189,6 +1248,52 @@ class _DealsListingViewState extends State<DealsListingView> {
     controller.setData(filtered);
   }
 
+  String? _followUpName(DealModel d) {
+    final id = d.followUp;
+    if (id == null || id.isEmpty) return null;
+    return CacheService()
+        .getAllListenableEmployees()
+        .value
+        .firstWhereOrNull((e) => e.uid == id)
+        ?.name;
+  }
+
+  Future<void> _exportDeals() async {
+    if (_exporting) return;
+    setState(() => _exporting = true);
+    try {
+      var rows = await DealService.getExportRows();
+      // Keep the export in line with the active filters.
+      if (_filteredDeals.length != _currentDeals.length) {
+        final numbers = _filteredDeals
+            .map((d) => d.dealNumber?.toString())
+            .whereType<String>()
+            .toSet();
+        rows = rows.where((r) => numbers.contains('${r['deal_number']}')).toList();
+      }
+      if (rows.isEmpty) {
+        if (mounted) {
+          FlushBar.show(context, 'No deals to export', isSuccess: false);
+        }
+        return;
+      }
+      final bytes = DealsExport.buildExcel(rows);
+      final stamp = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final path = await saveFileToDownloads(
+        bytes,
+        fileName: 'Deals_Export_$stamp.xlsx',
+      );
+      if (!mounted) return;
+      FlushBar.show(context, 'Deals exported successfully!');
+      if (!kIsWeb) openfile(path, context);
+    } catch (e, st) {
+      await ErrorService.recordError(e, st);
+      if (mounted) FlushBar.show(context, 'Export failed: $e', isSuccess: false);
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
   // ----------------------------------------------------------- ACTION ROW
 
   Widget _buildActionRow(BuildContext context) {
@@ -1229,7 +1334,30 @@ class _DealsListingViewState extends State<DealsListingView> {
           );
         }
 
-        // View toggle (Grid / List / Calendar)
+        if (actionButtons.isNotEmpty) {
+          actionButtons.add(const SizedBox(width: 10));
+        }
+        actionButtons.add(
+          OutlinedButton.icon(
+            onPressed: _exporting ? null : _exportDeals,
+            icon: _exporting
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.file_upload_outlined, size: 16),
+            label: const Text("Export"),
+            style: OutlinedButton.styleFrom(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            ),
+          ),
+        );
+
+        // View toggle (Board / List / Calendar / Timeline / Status Graph)
         final viewToggle = Container(
           height: 42,
           padding: const EdgeInsets.all(3),
@@ -1250,6 +1378,12 @@ class _DealsListingViewState extends State<DealsListingView> {
               _buildToggleIcon(Iconsax.grid_3, 'Grid', 'Board'),
               _buildToggleIcon(Icons.list, 'List', 'List'),
               _buildToggleIcon(Iconsax.calendar_1, 'Calendar', 'Calendar'),
+              _buildToggleIcon(Icons.show_chart_rounded, 'Timeline', 'Timeline'),
+              _buildToggleIcon(
+                Icons.stacked_bar_chart_rounded,
+                'StatusGraph',
+                'Status Graph',
+              ),
             ],
           ),
         );
@@ -1316,14 +1450,16 @@ class _DealsListingViewState extends State<DealsListingView> {
             size: 17,
             color: selected ? Colors.white : scheme.onSurfaceVariant,
           ),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              fontWeight: FontWeight.w600,
-              color: selected ? Colors.white : scheme.onSurfaceVariant,
+          if (!_compact) ...[
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: selected ? Colors.white : scheme.onSurfaceVariant,
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );
@@ -1332,7 +1468,8 @@ class _DealsListingViewState extends State<DealsListingView> {
       onTap: () => setState(() => _selectedView = viewName),
       child: child,
     );
-    return _compact ? Expanded(child: tap) : tap;
+    final tip = Tooltip(message: label, child: tap);
+    return _compact ? Expanded(child: tip) : tip;
   }
 
   // ------------------------------------------------------------- DATA ROW
@@ -1402,11 +1539,52 @@ class _DealsListingViewState extends State<DealsListingView> {
         /// Deal Name
         dataCell(
           context,
-          Text(
-            deal.dealName,
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w500),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                deal.dealName,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              if ((deal.companyName ?? '').trim().isNotEmpty)
+                Text(
+                  deal.companyName!.trim(),
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              if (_followUpName(deal) != null)
+                Container(
+                  margin: const EdgeInsets.only(top: 3),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Iconsax.user,
+                        size: 10,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        _followUpName(deal)!,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
           ),
         ),
 

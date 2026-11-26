@@ -621,21 +621,56 @@ class _DealsViewState extends State<DealsView> with TickerProviderStateMixin {
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        backgroundColor: Theme.of(context).colorScheme.surface,
+        backgroundColor: Colors.transparent,
+        foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: false,
-        title: Text(
-          "Deal Management",
-          style: TextStyle(
-            fontWeight: FontWeight.w800,
-            fontSize: 18,
-            color: Theme.of(context).colorScheme.onSurface,
-          ),
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(gradient: _brandGradient),
+        ),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Deal Portfolio Details",
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 16,
+                color: Colors.white,
+              ),
+            ),
+            Text(
+              "Comprehensive overview, attachments, logs & activities",
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.white.withValues(alpha: 0.85),
+              ),
+            ),
+          ],
         ),
         actions: [
+          if (_deal.dealNumber != null)
+            Container(
+              margin: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Text(
+                '#${_deal.dealNumber}',
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF1D4ED8),
+                ),
+              ),
+            ),
           if (_permissions?.canEdit ?? false) ...[
             if (!_deal.isLocked)
-              _appBarButton(Iconsax.edit, "Edit", () async {
+              _appBarButton(Iconsax.edit, "Edit Profile", () async {
                 if (kIsMobile || width < 1000) {
                   await Sheet.showSheet(
                     context,
@@ -704,7 +739,7 @@ class _DealsViewState extends State<DealsView> with TickerProviderStateMixin {
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
           child: Container(
-            color: Theme.of(context).colorScheme.outlineVariant,
+            color: Colors.transparent,
             height: 1,
           ),
         ),
@@ -777,16 +812,12 @@ class _DealsViewState extends State<DealsView> with TickerProviderStateMixin {
       icon: Icon(
         icon,
         size: 16,
-        color: isDanger
-            ? Theme.of(context).colorScheme.error
-            : Theme.of(context).colorScheme.primary,
+        color: Colors.white,
       ),
       label: Text(
         label,
-        style: TextStyle(
-          color: isDanger
-              ? Theme.of(context).colorScheme.error
-              : Theme.of(context).colorScheme.primary,
+        style: const TextStyle(
+          color: Colors.white,
           fontWeight: FontWeight.w600,
           fontSize: 13,
         ),

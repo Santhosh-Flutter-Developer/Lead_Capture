@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '/constants/constants.dart';
 import '/services/services.dart';
 import '/models/models.dart';
@@ -268,6 +269,36 @@ class DealService {
     required String dealUid,
     required String action,
   }) async {}
+
+  /// deals.php `status_graph`: status counts, staff leaderboard and summary.
+  /// [staffIds] empty = every follow-up staff member. Dates are optional.
+  static Future<Map<String, dynamic>> getStatusGraph({
+    List<String> staffIds = const [],
+    DateTime? from,
+    DateTime? to,
+  }) async {
+    try {
+      final f = DateFormat('yyyy-MM-dd');
+      final res = (await DealsApiService.call('status_graph', {
+        if (staffIds.isNotEmpty) 'staff_ids': staffIds,
+        if (from != null) 'from_date': f.format(from),
+        if (to != null) 'to_date': f.format(to),
+      })).ensureSuccess();
+      return res.dataMap;
+    } catch (e, st) {
+      _fail('Error loading deal status graph', e, st);
+    }
+  }
+
+  /// deals.php `export`: flat rows used to build the Excel file.
+  static Future<List<Map<String, dynamic>>> getExportRows() async {
+    try {
+      final res = (await DealsApiService.call('export')).ensureSuccess();
+      return res.dataList.map((r) => Js.m(r)).toList();
+    } catch (e, st) {
+      _fail('Error exporting deals', e, st);
+    }
+  }
 
   static Future<List<DealModel>> getAllDeals() async {
     try {

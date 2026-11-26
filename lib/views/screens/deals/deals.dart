@@ -6,3 +6,5 @@ export 'listing/bloc/deal_bloc.dart';
 export 'listing/deals_kanban_listing.dart';
 export 'listing/deals_timeline_chart.dart';
 export 'listing/deals_calendar_listing.dart';
+export 'listing/deals_status_graph.dart';
+export 'listing/deals_export.dart';
