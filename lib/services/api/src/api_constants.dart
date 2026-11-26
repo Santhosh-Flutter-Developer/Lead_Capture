@@ -24,6 +24,8 @@ class ApiEndpoints {
   static const locations = 'locations.php';
   static const calendar = 'calendar.php';
   static const downloads = 'downloads.php';
+  static const expenses = 'expenses.php';
+  static const expenseReport = 'expense_report.php';
 }
 
 /// `type` values accepted by masters.php.
@@ -42,6 +44,7 @@ class MasterTypes {
   static const department = 'department';
   static const subDepartment = 'sub_department';
   static const designation = 'designation';
+  static const expenseCategory = 'expense_category';
 }
 
 /// `module` values accepted by upload.php.
@@ -54,4 +57,5 @@ class UploadModules {
   static const ticket = 'ticket';
   static const payment = 'payment';
   static const updation = 'updation';
+  static const expense = 'expense';
 }

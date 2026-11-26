@@ -181,6 +181,12 @@ class _DesktopMainScreenState extends State<DesktopMainScreen> {
         return const PaymentListing();
       case 'Payment Report':
         return const PaymentReportPage();
+      case 'Expense Category':
+        return const ExpenseCategoryListing();
+      case 'Expenses':
+        return const ExpenseListing();
+      case 'Expense Report':
+        return const ExpenseReportPage();
       case 'Project Updation':
         return const ProjectUpdationListing();
       // case 'Companies':

@@ -17,6 +17,7 @@ export 'src/tasks_api_service.dart';
 export 'src/tickets_api_service.dart';
 export 'src/project_updations_api_service.dart';
 export 'src/payments_api_service.dart';
+export 'src/expenses_api_service.dart';
 export 'src/master_clients_api_service.dart';
 export 'src/notifications_api_service.dart';
 export 'src/chats_api_service.dart';

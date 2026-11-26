@@ -69,6 +69,7 @@ enum StorageFolder {
   ticketAttachments,
   updationAttachments,
   paymentAttachments,
+  expenseAttachments,
 }
 
 enum TicketCategory {

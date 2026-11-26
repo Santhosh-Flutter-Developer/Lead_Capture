@@ -47,6 +47,12 @@ IconData rolePageIcon(String page) {
       return Iconsax.wallet_3;
     case 'Payment Report':
       return Iconsax.chart_21;
+    case 'Expense Category':
+      return Iconsax.category;
+    case 'Expenses':
+      return Iconsax.dollar_circle;
+    case 'Expense Report':
+      return Iconsax.chart_21;
     case 'Project Updation':
       return Iconsax.refresh_circle;
     case 'Company':

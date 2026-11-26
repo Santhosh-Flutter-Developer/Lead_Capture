@@ -19,6 +19,8 @@ export 'src/payment_service.dart';
 export 'src/payment_mode_service.dart';
 export 'src/payment_report_service.dart';
 export 'src/payment_report_export_service.dart';
+export 'src/expense_service.dart';
+export 'src/expense_export_service.dart';
 export 'src/windows_notification_service.dart';
 export 'src/deal_status_service.dart';
 export 'src/realtime_service.dart';

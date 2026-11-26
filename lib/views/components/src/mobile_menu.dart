@@ -313,6 +313,15 @@ class _MobileMenuState extends State<MobileMenu> {
       case 'payment_report':
         Navigate.route(context, const PaymentReportPage());
         break;
+      case 'expense_category':
+        Navigate.route(context, const ExpenseCategoryListing());
+        break;
+      case 'expenses':
+        Navigate.route(context, const ExpenseListing());
+        break;
+      case 'expense_report':
+        Navigate.route(context, const ExpenseReportPage());
+        break;
       case 'project_updation':
         Navigate.route(context, const ProjectUpdationListing());
         break;

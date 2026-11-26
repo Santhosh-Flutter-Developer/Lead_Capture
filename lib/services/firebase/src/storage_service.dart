@@ -27,6 +27,8 @@ class StorageService {
         return UploadModules.updation;
       case StorageFolder.paymentAttachments:
         return UploadModules.payment;
+      case StorageFolder.expenseAttachments:
+        return UploadModules.expense;
       case StorageFolder.feedAttachments:
         return 'feed';
       case StorageFolder.chats:

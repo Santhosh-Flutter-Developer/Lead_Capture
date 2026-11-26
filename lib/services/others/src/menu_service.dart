@@ -255,6 +255,36 @@ class MenuService {
         ],
       ),
 
+      // Expense Section
+      MenuItem(
+        id: 'expense',
+        title: 'Expense',
+        icon: Iconsax.dollar_circle,
+        children: [
+          MenuItem(
+            id: 'expense_category',
+            title: 'Expense Category',
+            icon: Iconsax.category,
+            route: '/expense-category',
+            requiredPermissions: ['Expense Category'],
+          ),
+          MenuItem(
+            id: 'expenses',
+            title: 'Expenses',
+            icon: Iconsax.wallet_3,
+            route: '/expenses',
+            requiredPermissions: ['Expenses'],
+          ),
+          MenuItem(
+            id: 'expense_report',
+            title: 'Expense Report',
+            icon: Iconsax.chart_21,
+            route: '/expense-report',
+            requiredPermissions: ['Expense Report', 'Expenses'],
+          ),
+        ],
+      ),
+
       // Companies
       // MenuItem(
       //   id: 'companies',
@@ -485,6 +515,9 @@ class MenuService {
       'Our Company',
       'Payment',
       'Payment Report',
+      'Expense Category',
+      'Expenses',
+      'Expense Report',
       'Calendar',
       'Projects',
       'Tasks',
