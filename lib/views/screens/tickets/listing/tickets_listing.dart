@@ -87,6 +87,7 @@ class _TicketListingViewState extends State<TicketListingView> {
   final List<CustomerTicketModel> _selectedTickets = [];
   PermissionModel? permissions;
   bool _permissionsLoaded = false;
+  bool _exporting = false;
   String? _currentUid;
   bool _isAdmin = false;
   final ScrollController _hScrollController = ScrollController();
@@ -664,6 +665,61 @@ class _TicketListingViewState extends State<TicketListingView> {
   // ---------------------------------------------------------------------
   // Toolbar: search + add + delete + refresh
   // ---------------------------------------------------------------------
+  /// Exports exactly what the table shows: search box + every filter applied.
+  Future<void> _exportTickets(
+    PaginatedDataController<CustomerTicketModel> controller,
+  ) async {
+    if (_exporting) return;
+    setState(() => _exporting = true);
+    try {
+      String createdBy(CustomerTicketModel t) {
+        if (t.ticketCreatedBy.uid.isNotEmpty) return t.ticketCreatedBy.name;
+        return t.createdBy
+            .map((uid) => CacheService.getUserByUid(uid)?.name ?? '')
+            .where((n) => n.isNotEmpty)
+            .join(', ');
+      }
+
+      final list = controller.filteredItems;
+      final rows = <List<Object?>>[
+        for (final t in list)
+          [
+            t.ticketNumber ?? '',
+            t.ticketTitle,
+            t.statusText,
+            t.clientName,
+            t.priorityLevel.label,
+            t.category.label,
+            t.project != null ? (_projectNameOf(t.project!) ?? '') : '',
+            ListingExport.date(t.createdAt),
+            ListingExport.date(t.deadline),
+            createdBy(t),
+          ],
+      ];
+      await ListingExport.run(
+        context,
+        label: 'Tickets',
+        filePrefix: 'Tickets',
+        headers: const [
+          'Ticket No',
+          'Ticket Title',
+          'Status',
+          'Master Client',
+          'Priority',
+          'Category',
+          'Project',
+          'Created Date',
+          'Deadline',
+          'Created By',
+        ],
+        widths: const [11, 34, 16, 26, 12, 22, 26, 20, 20, 24],
+        rows: rows,
+      );
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
   Widget _buildToolbar(
     BuildContext context,
     PaginatedDataController<CustomerTicketModel> controllerRead,
@@ -691,6 +747,24 @@ class _TicketListingViewState extends State<TicketListingView> {
           label: "Cancel (${_selectedTickets.length})",
           colors: const [Color(0xFFDC3545), Color(0xFFFF6B6B)],
           onPressed: _bulkDelete,
+        ),
+      if (permissions?.canExport ?? false)
+        OutlinedButton.icon(
+          onPressed: _exporting ? null : () => _exportTickets(controllerRead),
+          icon: _exporting
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.file_upload_outlined, size: 16),
+          label: const Text("Export"),
+          style: OutlinedButton.styleFrom(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          ),
         ),
       if (isWide)
         _iconCircleButton(

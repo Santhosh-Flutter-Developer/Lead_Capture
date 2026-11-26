@@ -68,6 +68,7 @@ class _ProjectsListingViewState extends State<ProjectsListingView> {
   final List<ProjectModel> _selectedProjects = [];
   PermissionModel? permissions;
   bool _permissionsLoaded = false;
+  bool _exporting = false;
   final ScrollController _hScrollController = ScrollController();
   final ScrollController _vScrollController = ScrollController();
 
@@ -510,6 +511,49 @@ class _ProjectsListingViewState extends State<ProjectsListingView> {
   // ---------------------------------------------------------------------
   // Toolbar: search + add + delete + refresh
   // ---------------------------------------------------------------------
+  /// Exports exactly what the table shows: search box + every filter applied.
+  Future<void> _exportProjects(
+    PaginatedDataController<ProjectModel> controller,
+  ) async {
+    if (_exporting) return;
+    setState(() => _exporting = true);
+    try {
+      final list = controller.filteredItems;
+      final rows = <List<Object?>>[
+        for (var i = 0; i < list.length; i++)
+          [
+            i + 1,
+            list[i].projectName,
+            list[i].projectCode ?? '',
+            _masterClientName(list[i]),
+            _leadNameOf(list[i]),
+            ListingExport.date(list[i].deadline),
+            list[i].createdBy.name,
+            ListingExport.date(list[i].createdAt),
+          ],
+      ];
+      await ListingExport.run(
+        context,
+        label: 'Projects',
+        filePrefix: 'Projects',
+        headers: const [
+          'S.No',
+          'Project Name',
+          'Project Code',
+          'Master Client',
+          'Project Lead',
+          'Deadline',
+          'Created By',
+          'Created Date',
+        ],
+        widths: const [8, 30, 16, 26, 24, 20, 24, 20],
+        rows: rows,
+      );
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
   Widget _buildToolbar(
     BuildContext context,
     PaginatedDataController<ProjectModel> controllerRead,
@@ -542,6 +586,24 @@ class _ProjectsListingViewState extends State<ProjectsListingView> {
           label: "Delete (${_selectedProjects.length})",
           colors: const [Color(0xFFDC3545), Color(0xFFFF6B6B)],
           onPressed: _bulkDelete,
+        ),
+      if (permissions?.canExport ?? false)
+        OutlinedButton.icon(
+          onPressed: _exporting ? null : () => _exportProjects(controllerRead),
+          icon: _exporting
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.file_upload_outlined, size: 16),
+          label: const Text("Export"),
+          style: OutlinedButton.styleFrom(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          ),
         ),
       if (isWide)
         _iconCircleButton(

@@ -97,6 +97,7 @@ class _TaskListingViewState extends State<TaskListingView> {
   final List<TaskModel> _selectedTasks = [];
   PermissionModel? permissions;
   bool _permissionsLoaded = false;
+  bool _exporting = false;
   String _selectedView = 'Grid';
   String? _currentUid;
   bool _isAdmin = false;
@@ -576,6 +577,57 @@ class _TaskListingViewState extends State<TaskListingView> {
   // ---------------------------------------------------------------------
   // Toolbar: search + add + delete + view toggle + refresh
   // ---------------------------------------------------------------------
+  /// Exports exactly what the table shows: search box + every filter applied.
+  Future<void> _exportTasks(
+    PaginatedDataController<TaskModel> controller,
+  ) async {
+    if (_exporting) return;
+    setState(() => _exporting = true);
+    try {
+      String createdBy(TaskModel t) {
+        if (t.taskCreatedBy.uid.isNotEmpty) return t.taskCreatedBy.name;
+        return t.createdBy
+            .map((uid) => CacheService.getUserByUid(uid)?.name ?? '')
+            .where((n) => n.isNotEmpty)
+            .join(', ');
+      }
+
+      final list = controller.filteredItems;
+      final rows = <List<Object?>>[
+        for (final t in list)
+          [
+            t.taskNumber ?? '',
+            t.taskName,
+            _projectName(t.project),
+            t.statusText,
+            t.highPriority ? 'High' : 'Normal',
+            ListingExport.date(t.createdAt),
+            ListingExport.date(t.deadline),
+            createdBy(t),
+          ],
+      ];
+      await ListingExport.run(
+        context,
+        label: 'Tasks',
+        filePrefix: 'Tasks',
+        headers: const [
+          'Task No',
+          'Task Name',
+          'Project',
+          'Status',
+          'Priority',
+          'Created Date',
+          'Deadline',
+          'Created By',
+        ],
+        widths: const [10, 34, 26, 16, 12, 20, 20, 24],
+        rows: rows,
+      );
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
   Widget _buildToolbar(
     BuildContext context,
     PaginatedDataController<TaskModel> controllerRead,
@@ -603,6 +655,24 @@ class _TaskListingViewState extends State<TaskListingView> {
           label: "Cancel (${_selectedTasks.length})",
           colors: const [Color(0xFFDC3545), Color(0xFFFF6B6B)],
           onPressed: _bulkDelete,
+        ),
+      if (permissions?.canExport ?? false)
+        OutlinedButton.icon(
+          onPressed: _exporting ? null : () => _exportTasks(controllerRead),
+          icon: _exporting
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.file_upload_outlined, size: 16),
+          label: const Text("Export"),
+          style: OutlinedButton.styleFrom(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          ),
         ),
       _buildViewToggle(context),
     ];
