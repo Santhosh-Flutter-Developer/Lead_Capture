@@ -21,6 +21,7 @@ class CustomSearchableDropdown<T> extends StatefulWidget {
   final EdgeInsetsGeometry padding;
   final Widget? emptyWidget;
   final bool showDoneButton; // show done to confirm selections in multi-select
+  final bool showSelectAll; // multi-select only: "Select All" / "Clear All" row
   final bool showClearButton; // show an "x" to clear the current selection (single-select only)
   final double height; // height of the closed control
 
@@ -40,6 +41,7 @@ class CustomSearchableDropdown<T> extends StatefulWidget {
     this.emptyWidget,
     this.showDoneButton = true,
     this.showClearButton = true,
+    this.showSelectAll = false,
     this.height = 33,
   });
 
@@ -210,6 +212,17 @@ class _CustomSearchableDropdownState<T>
     // do not close on multi-select tap; user will press Done (or you can set notify immediate)
     // optionally notify live changes:
     // widget.onChangedList?.call(List<T>.from(_selectedList));
+  }
+
+  /// Select (or clear) every item currently matching the search text.
+  void _setAllMulti(bool select) {
+    setState(() {
+      for (final item in _filtered) {
+        _selectedList.removeWhere((e) => e == item);
+        if (select) _selectedList.add(item);
+      }
+    });
+    _overlayEntry?.markNeedsBuild();
   }
 
   /// Called from controller listener - this filters items and calls setState so
@@ -404,6 +417,48 @@ class _CustomSearchableDropdownState<T>
                                   ),
                                 ),
                               ),
+
+                              if (widget.multiSelect && widget.showSelectAll)
+                                Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    12,
+                                    0,
+                                    12,
+                                    4,
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      InkWell(
+                                        onTap: () => _setAllMulti(true),
+                                        child: Text(
+                                          'Select All',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                            color: Theme.of(
+                                              context,
+                                            ).primaryColor,
+                                          ),
+                                        ),
+                                      ),
+                                      InkWell(
+                                        onTap: () => _setAllMulti(false),
+                                        child: Text(
+                                          'Clear All',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.onSurfaceVariant,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
 
                               // list / empty
                               if (_filtered.isEmpty)

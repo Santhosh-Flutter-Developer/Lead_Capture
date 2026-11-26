@@ -416,11 +416,13 @@ class _LeadStatusGraphState extends State<LeadStatusGraph> {
     final emp = uid.isEmpty ? null : CacheService.employeeByUid(uid);
     final name = uid.isEmpty ? 'Unassigned' : (emp?.name ?? 'Unknown');
     final email = emp?.email ?? '';
+    // `designation` holds a designation uid: resolve it to the real name.
+    final designationName = (emp == null || emp.designation.trim().isEmpty)
+        ? ''
+        : (CacheService.designationByUid(emp.designation)?.name ?? '');
     final role = uid.isEmpty
         ? 'Staff'
-        : ((emp?.designation ?? '').trim().isEmpty
-              ? 'Employee'
-              : emp!.designation);
+        : (designationName.isEmpty ? 'Employee' : designationName);
     final converted = list.where((l) => l.leadsConverted).length;
     final rate = list.isEmpty ? 0 : (converted * 100 / list.length).round();
     final pipeline = list.fold<double>(0, (a, l) => a + l.leadValue);
@@ -686,6 +688,7 @@ class _LeadStatusGraphState extends State<LeadStatusGraph> {
                       key: ValueKey('staff$_resetCount'),
                       items: names.keys.where((k) => k.isNotEmpty).toList(),
                       multiSelect: true,
+                      showSelectAll: true,
                       initialValues: _draftStaff,
                       itemAsString: (u) => names[u] ?? u,
                       hintText: 'All Follow-up Staff (${emps.length})',
