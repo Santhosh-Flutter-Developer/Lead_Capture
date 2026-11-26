@@ -31,7 +31,11 @@ const String _pageTitle = "Deals";
 
 class DealsListing extends StatelessWidget {
   final bool showAppBar;
-  const DealsListing({super.key, this.showAppBar = true});
+
+  /// When set, the list opens filtered to this single deal (used by
+  /// "View Deal" on a converted lead). "Reset Filters" clears it.
+  final String? focusDealUid;
+  const DealsListing({super.key, this.showAppBar = true, this.focusDealUid});
 
   @override
   Widget build(BuildContext context) {
@@ -77,7 +81,10 @@ class DealsListing extends StatelessWidget {
           },
           getItemId: (deal) => deal.uid ?? '',
         ),
-        child: DealsListingView(showAppBar: showAppBar),
+        child: DealsListingView(
+          showAppBar: showAppBar,
+          focusDealUid: focusDealUid,
+        ),
       ),
     );
   }
@@ -85,7 +92,12 @@ class DealsListing extends StatelessWidget {
 
 class DealsListingView extends StatefulWidget {
   final bool showAppBar;
-  const DealsListingView({super.key, this.showAppBar = true});
+  final String? focusDealUid;
+  const DealsListingView({
+    super.key,
+    this.showAppBar = true,
+    this.focusDealUid,
+  });
   @override
   State<DealsListingView> createState() => _DealsListingViewState();
 }
@@ -98,6 +110,9 @@ class _DealsListingViewState extends State<DealsListingView> {
   String _selectedView = 'Grid';
   final List<DealModel> _selectedDeals = [];
   List<DealModel> _filteredDeals = [];
+
+  /// Single deal to show (set from "View Deal" on a lead); cleared on reset.
+  String? _focusDealUid;
 
   DateTime? _fromDate;
   DateTime? _toDate;
@@ -134,6 +149,7 @@ class _DealsListingViewState extends State<DealsListingView> {
   @override
   void initState() {
     super.initState();
+    _focusDealUid = widget.focusDealUid;
     _loadPermissions();
     _loadFilterMasters();
   }
@@ -229,6 +245,7 @@ class _DealsListingViewState extends State<DealsListingView> {
   }
 
   void _resetFilters() {
+    _focusDealUid = null;
     setState(() {
       _fromDate = null;
       _toDate = null;
@@ -286,6 +303,8 @@ class _DealsListingViewState extends State<DealsListingView> {
               _filteredDeals = state.deals;
             });
             _loadFilterMasters();
+            // Opened from a lead's "View Deal": narrow to that one deal.
+            if (_focusDealUid != null) _applyFilters();
           }
         },
         child: BlocBuilder<DealBloc, DealState>(
@@ -1168,6 +1187,12 @@ class _DealsListingViewState extends State<DealsListingView> {
         : <DealModel>[];
 
     List<DealModel> filtered = allDeals;
+
+    // "View Deal" from a lead: show only that deal until filters are reset.
+    if (_focusDealUid != null) {
+      filtered = filtered.where((d) => d.uid == _focusDealUid).toList();
+    }
+
     final query = _searchController.text.toLowerCase();
 
     if (query.isNotEmpty) {

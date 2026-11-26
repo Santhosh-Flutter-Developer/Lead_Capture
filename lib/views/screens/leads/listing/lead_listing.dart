@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:intl/intl.dart';
+import 'package:leadcapture/constants/src/enum.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:iconsax/iconsax.dart';
@@ -7,6 +9,7 @@ import 'package:leadcapture/utils/src/download_io.dart'
     if (dart.library.html) 'package:leadcapture/utils/src/download_web.dart'
     show saveFileToDownloads;
 import 'package:leadcapture/views/screens/leads/listing/lead_upload.dart';
+import 'package:leadcapture/views/screens/leads/listing/lead_status_graph.dart';
 import 'package:provider/provider.dart';
 import 'package:collection/collection.dart';
 import '/services/services.dart';
@@ -91,11 +94,16 @@ class _LeadsListingViewState extends State<LeadsListingView> {
   final ScrollController _hScrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _vScrollController = ScrollController();
-  String _selectedView = 'Grid';
+  String _selectedView = 'List';
+  List<LeadStatusModel> _statuses = [];
+  String? _selectedFollowUp; // employee uid
+  int _resetCount = 0;
+  final Map<String, String> _statusOverride = {};
   List<LeadModel> _filteredLeads = [];
   PermissionModel? permissions;
   bool _permissionsLoaded = false;
   bool _compact = false;
+  double _contentWidth = 1200;
   bool _filtersExpanded = false;
   double _filterWidth = 180;
 
@@ -200,6 +208,9 @@ class _LeadsListingViewState extends State<LeadsListingView> {
       _selectedClient = null;
       _selectedProject = null;
       _selectedConverted = null;
+      _selectedFollowUp = null;
+      _value = null;
+      _resetCount++;
       _searchController.clear();
     });
     _applyFilters();
@@ -222,6 +233,7 @@ class _LeadsListingViewState extends State<LeadsListingView> {
       body: LayoutBuilder(
         builder: (context, box) {
           _compact = box.maxWidth < _wideBreakpoint;
+          _contentWidth = box.maxWidth;
           return _buildBody(context, controllerRead, controllerWatch);
         },
       ),
@@ -250,6 +262,7 @@ class _LeadsListingViewState extends State<LeadsListingView> {
               return const WaitingLoading();
             }
             if (state is LeadLoaded) {
+              _statuses = state.allStatuses;
               if (!_permissionsLoaded) {
                 return const WaitingLoading();
               }
@@ -284,8 +297,21 @@ class _LeadsListingViewState extends State<LeadsListingView> {
                         _buildSelectionBar(controllerWatch, controllerRead),
                       ],
                       const SizedBox(height: 18),
-                      if (controllerWatch.paginatedItems.isEmpty)
-                        const NoData(text: "No matching records found")
+                      if (_selectedView == 'Graph')
+                        LeadStatusGraph(
+                          leads: state.leads,
+                          statuses: state.allStatuses,
+                          onViewLeads: (uid) {
+                            setState(() {
+                              _selectedFollowUp = uid;
+                              _selectedView = 'List';
+                              _resetCount++;
+                            });
+                            _applyFilters();
+                          },
+                        )
+                      else if (controllerWatch.paginatedItems.isEmpty)
+                        _buildEmptyState()
                       else if (_selectedView == 'Grid') ...[
                         LeadKanbanListing(
                           leadList: _filteredLeads,
@@ -324,232 +350,750 @@ class _LeadsListingViewState extends State<LeadsListingView> {
     );
   }
 
-  Container _buildListView(
+  // ---------------------------------------------------------------------
+  // Reference-style helpers
+  // ---------------------------------------------------------------------
+  static const Color _ink = Color(0xFF0F172A);
+  static const Color _muted = Color(0xFF64748B);
+  static const Color _line = Color(0xFFE2E8F0);
+  static const Color _blue = Color(0xFF2563EB);
+
+  final NumberFormat _money = NumberFormat.currency(
+    locale: 'en_IN',
+    symbol: '₹',
+    decimalDigits: 2,
+  );
+
+  Widget _buildEmptyState() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 48),
+      decoration: _cardDecoration(),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: _blue.withValues(alpha: 0.08),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Iconsax.personalcard, color: _blue, size: 26),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'No matching leads found',
+            style: TextStyle(fontWeight: FontWeight.w700, color: _ink),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Try adjusting your filters or add a new lead.',
+            style: TextStyle(fontSize: 12, color: _muted),
+          ),
+        ],
+      ),
+    );
+  }
+
+  BoxDecoration _cardDecoration() => BoxDecoration(
+    color: Colors.white,
+    borderRadius: BorderRadius.circular(14),
+    border: Border.all(color: _line),
+    boxShadow: [
+      BoxShadow(
+        color: Colors.black.withValues(alpha: 0.04),
+        blurRadius: 10,
+        offset: const Offset(0, 4),
+      ),
+    ],
+  );
+
+  // Column widths (px) for: check, id, name, email, mobile, value, source,
+  // status, priority, created, follow up, created by, action.
+  static const List<double> _w = [
+    44, 78, 210, 190, 112, 108, 104, 136, 92, 106, 140, 160, 150,
+  ];
+  double get _tableWidth => _w.fold(0.0, (a, b) => a + b);
+
+  Widget _cell(int i, Widget child, {Alignment align = Alignment.centerLeft}) {
+    return SizedBox(
+      width: _w[i],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Align(alignment: align, child: child),
+      ),
+    );
+  }
+
+  Widget _headCell(
+    int i,
+    String label,
+    PaginatedDataController<LeadModel> c, {
+    int? sortIndex,
+  }) {
+    final sorted = sortIndex != null && c.sortColumnIndex == sortIndex;
+    final text = Text(
+      label,
+      style: const TextStyle(
+        fontSize: 11.5,
+        fontWeight: FontWeight.w700,
+        color: _ink,
+      ),
+    );
+    return _cell(
+      i,
+      sortIndex == null
+          ? text
+          : InkWell(
+              onTap: () => context
+                  .read<PaginatedDataController<LeadModel>>()
+                  .setSort(sortIndex, sorted ? !c.sortAscending : true),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  text,
+                  const SizedBox(width: 3),
+                  Icon(
+                    sorted && !c.sortAscending
+                        ? Icons.arrow_downward
+                        : Icons.arrow_upward,
+                    size: 12,
+                    color: sorted ? _blue : const Color(0xFF94A3B8),
+                  ),
+                ],
+              ),
+            ),
+    );
+  }
+
+  Widget _buildListView(
     BuildContext context,
     PaginatedDataController<LeadModel> controllerWatch,
     PaginatedDataController<LeadModel> controllerRead,
   ) {
+    final items = controllerWatch.paginatedItems;
+    final selectable = items
+        .where((l) => !l.leadsConverted && (l.uid ?? '').isNotEmpty)
+        .map((l) => l.uid!)
+        .toList();
+    final allSelected =
+        selectable.isNotEmpty &&
+        selectable.every(controllerWatch.selectedIds.contains);
+
     return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-        boxShadow: [
-          BoxShadow(
-            color: Theme.of(context).colorScheme.shadow.withValues(alpha: 0.06),
-            blurRadius: 14,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
+      decoration: _cardDecoration(),
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
           LayoutBuilder(
             builder: (context, constraints) {
+              final width = constraints.maxWidth > _tableWidth
+                  ? constraints.maxWidth
+                  : _tableWidth;
               return Scrollbar(
                 controller: _hScrollController,
                 thumbVisibility: true,
-                trackVisibility: true,
-                thickness: 4,
-                radius: const Radius.circular(6),
-                scrollbarOrientation: ScrollbarOrientation.bottom,
                 child: SingleChildScrollView(
                   controller: _hScrollController,
                   scrollDirection: Axis.horizontal,
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(minWidth: constraints.maxWidth),
-                    child: DataTable(
-                      showCheckboxColumn: _canDelete,
-                      onSelectAll: _canDelete
-                          ? (selected) => _setPageSelection(
-                              controllerRead,
-                              selected ?? false,
-                            )
-                          : null,
-                      columnSpacing: 12,
-                      horizontalMargin: 8,
-                      // headingRowHeight: 40,
-                      // dataRowMinHeight: 36,
-                      // dataRowMaxHeight: 36,
-                      sortColumnIndex: controllerWatch.sortColumnIndex,
-                      sortAscending: controllerWatch.sortAscending,
-                      headingRowColor: WidgetStateProperty.all(
-                        Theme.of(context).colorScheme.primary.withValues(
-                          alpha: 0.06,
-                        ),
-                      ),
-                      headingTextStyle: Theme.of(context).textTheme.bodySmall
-                          ?.copyWith(
-                            fontWeight: FontWeight.bold,
-                            color: Theme.of(context).colorScheme.primary,
+                  child: SizedBox(
+                    width: width,
+                    child: Column(
+                      children: [
+                        // Header
+                        Container(
+                          height: 44,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFFF8FAFC),
+                            border: Border(bottom: BorderSide(color: _line)),
                           ),
-                      columns: [
-                        DataColumn(
-                          label: IntrinsicWidth(
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  "Id",
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
-                                const SizedBox(width: 4),
-                                Icon(
-                                  Icons.arrow_upward,
-                                  size: 14,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                ),
-                              ],
-                            ),
-                          ),
-                          onSort: controllerRead.setSort,
-                        ),
-                        DataColumn(
-                          label: IntrinsicWidth(
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  "Name",
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
-                                const SizedBox(width: 4),
-                                Icon(
-                                  Icons.arrow_upward,
-                                  size: 14,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                ),
-                              ],
-                            ),
-                          ),
-                          onSort: controllerRead.setSort,
-                        ),
-                        DataColumn(
-                          label: IntrinsicWidth(
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  "Email",
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
-                                const SizedBox(width: 4),
-                                Icon(
-                                  Icons.arrow_upward,
-                                  size: 14,
-                                  color: AppColors.grey400,
-                                ),
-                              ],
-                            ),
-                          ),
-                          onSort: controllerRead.setSort,
-                        ),
-                        DataColumn(
-                          label: IntrinsicWidth(
-                            child: Text(
-                              "Mobile No",
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
+                          child: Row(
+                            children: [
+                              _cell(
+                                0,
+                                _canDelete
+                                    ? Checkbox(
+                                        value: allSelected,
+                                        visualDensity: VisualDensity.compact,
+                                        onChanged: selectable.isEmpty
+                                            ? null
+                                            : (v) => _setPageSelection(
+                                                controllerRead,
+                                                v ?? false,
+                                              ),
+                                      )
+                                    : const SizedBox.shrink(),
+                              ),
+                              _headCell(1, 'Id', controllerWatch, sortIndex: 1),
+                              _headCell(2, 'Name', controllerWatch, sortIndex: 2),
+                              _headCell(3, 'Email', controllerWatch, sortIndex: 3),
+                              _headCell(4, 'Mobile No', controllerWatch),
+                              _headCell(5, 'Lead Value', controllerWatch, sortIndex: 5),
+                              _headCell(6, 'Source', controllerWatch),
+                              _headCell(7, 'Status', controllerWatch),
+                              _headCell(8, 'Priority', controllerWatch),
+                              _headCell(9, 'Created', controllerWatch, sortIndex: 6),
+                              _headCell(10, 'Follow Up', controllerWatch),
+                              _headCell(11, 'Created By', controllerWatch),
+                              _headCell(12, 'Action', controllerWatch),
+                            ],
                           ),
                         ),
-                        DataColumn(
-                          label: IntrinsicWidth(
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  "Lead Value",
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
-                                const SizedBox(width: 4),
-                                Icon(
-                                  Icons.arrow_upward,
-                                  size: 14,
-                                  color: AppColors.grey400,
-                                ),
-                              ],
-                            ),
-                          ),
-                          onSort: controllerRead.setSort,
-                        ),
-                        DataColumn(
-                          label: IntrinsicWidth(
-                            child: Text(
-                              "Source",
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ),
-                        ),
-                        DataColumn(
-                          label: IntrinsicWidth(
-                            child: Text(
-                              "Status",
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ),
-                        ),
-                        DataColumn(
-                          label: IntrinsicWidth(
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  "Created",
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
-                                const SizedBox(width: 4),
-                                Icon(
-                                  Icons.arrow_upward,
-                                  size: 14,
-                                  color: AppColors.grey400,
-                                ),
-                              ],
-                            ),
-                          ),
-                          onSort: controllerRead.setSort,
-                        ),
-                        DataColumn(
-                          label: IntrinsicWidth(
-                            child: Text(
-                              "Created By",
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ),
-                        ),
-                        DataColumn(
-                          label: IntrinsicWidth(
-                            child: Text(
-                              "Action",
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ),
-                        ),
+                        for (final lead in items)
+                          _buildRow(context, lead, controllerWatch, controllerRead),
                       ],
-                      rows: controllerWatch.paginatedItems.map((lead) {
-                        return _buildDataRow(
-                          context,
-                          lead,
-                          controllerWatch,
-                          controllerRead,
-                        );
-                      }).toList(),
                     ),
                   ),
                 ),
               );
             },
           ),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-            child: PaginationControls<LeadModel>(),
+          _buildFooter(controllerWatch, controllerRead),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFooter(
+    PaginatedDataController<LeadModel> c,
+    PaginatedDataController<LeadModel> r,
+  ) {
+    final style = const TextStyle(fontSize: 12, color: _muted);
+    Widget pageBtn(Widget child, VoidCallback? onTap, {bool active = false}) =>
+        InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(6),
+          child: Container(
+            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: active ? _blue : Colors.white,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: active ? _blue : _line),
+            ),
+            child: child,
+          ),
+        );
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: _line)),
+      ),
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        runSpacing: 8,
+        spacing: 16,
+        children: [
+          Text(
+            'Showing ${c.startEntry} to ${c.endEntry} of ${c.totalEntries} entries',
+            style: style,
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Rows:', style: style),
+              const SizedBox(width: 6),
+              Container(
+                height: 28,
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: _line),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<int>(
+                    value: c.rowsPerPage,
+                    isDense: true,
+                    icon: const Icon(Icons.arrow_drop_down, size: 16),
+                    items: [10, 25, 50, 100]
+                        .map(
+                          (v) => DropdownMenuItem<int>(
+                            value: v,
+                            child: Text('$v', style: const TextStyle(fontSize: 12)),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: r.setRowsPerPage,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              pageBtn(
+                const Icon(Icons.chevron_left, size: 16, color: _muted),
+                c.currentPage > 1 ? r.previousPage : null,
+              ),
+              const SizedBox(width: 4),
+              pageBtn(
+                Text(
+                  '${c.currentPage}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+                null,
+                active: true,
+              ),
+              const SizedBox(width: 4),
+              pageBtn(
+                const Icon(Icons.chevron_right, size: 16, color: _muted),
+                c.currentPage < c.totalPages ? r.nextPage : null,
+              ),
+            ],
           ),
         ],
       ),
+    );
+  }
+
+  Widget _chip(String text, Color bg, {Color fg = Colors.white, double size = 10.5}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: size,
+          fontWeight: FontWeight.w700,
+          color: fg,
+        ),
+      ),
+    );
+  }
+
+  Widget _letterAvatar(String name, {double size = 28}) {
+    final letter = name.trim().isEmpty ? '?' : name.trim()[0].toUpperCase();
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: const Color(0xFFDBEAFE),
+        borderRadius: BorderRadius.circular(size / 2),
+      ),
+      child: Text(
+        letter,
+        style: TextStyle(
+          fontSize: size * 0.42,
+          fontWeight: FontWeight.w700,
+          color: _blue,
+        ),
+      ),
+    );
+  }
+
+  Widget _followUpCell(LeadModel lead) {
+    final uid = lead.followUp ?? '';
+    if (uid.isEmpty) {
+      return const Text('—', style: TextStyle(color: _muted, fontSize: 12));
+    }
+    final emp = CacheService.employeeByUid(uid);
+    final name = emp?.name ?? '';
+    if (name.isEmpty) {
+      return const Text('—', style: TextStyle(color: _muted, fontSize: 12));
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        UserAvatar(
+          size: 22,
+          showCrown: false,
+          userData: UserDataModel(
+            uid: uid,
+            name: name,
+            profilePic: emp?.profileImageUrl,
+            userType: UserType.employee,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            name,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _ink),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _statusCell(LeadModel lead) {
+    final override = _statusOverride[lead.uid ?? ''];
+    if (override != null && override == lead.leadStatus) {
+      _statusOverride.remove(lead.uid ?? '');
+    }
+    final effective = _statusOverride[lead.uid ?? ''] ?? lead.leadStatus;
+    final current = CacheService.leadStatusByUid(effective);
+    final color = Color(current?.color ?? 0xFF64748B);
+    if (lead.leadsConverted) {
+      return _chip(
+        '✓ Converted',
+        const Color(0xFFDCFCE7),
+        fg: const Color(0xFF15803D),
+      );
+    }
+    final pill = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            current?.name ?? '—',
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: color),
+          ),
+          Icon(Icons.arrow_drop_down, size: 16, color: color),
+        ],
+      ),
+    );
+    if (!_canEdit || _statuses.isEmpty) return pill;
+    return PopupMenuButton<LeadStatusModel>(
+      tooltip: 'Change status',
+      padding: EdgeInsets.zero,
+      onSelected: (s) => _changeStatus(lead, s),
+      itemBuilder: (_) => [
+        for (final s in _statuses)
+          if (s.uid != effective)
+            PopupMenuItem<LeadStatusModel>(
+              value: s,
+              height: 34,
+              child: Text(s.name, style: const TextStyle(fontSize: 12)),
+            ),
+      ],
+      child: pill,
+    );
+  }
+
+  Future<void> _changeStatus(LeadModel lead, LeadStatusModel s) async {
+    final leadUid = lead.uid ?? '';
+    final statusUid = s.uid ?? '';
+    if (leadUid.isEmpty || statusUid.isEmpty) return;
+    // Optimistic: show the new status immediately.
+    setState(() => _statusOverride[leadUid] = statusUid);
+    try {
+      await LeadService.updateLeadStatus(uid: leadUid, leadStatus: statusUid);
+      if (!mounted) return;
+      FlushBar.show(context, 'Status updated to ${s.name}');
+      context.read<LeadBloc>().add(StreamLead());
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _statusOverride.remove(leadUid));
+      FlushBar.show(context, e.toString(), isSuccess: false);
+    }
+  }
+
+  Widget _iconAction(
+    IconData icon,
+    Color color,
+    String tip,
+    VoidCallback onTap,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: Tooltip(
+        message: tip,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(6),
+          child: Container(
+            width: 26,
+            height: 26,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Icon(icon, size: 14, color: color),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openLead(LeadModel lead) async {
+    final result = (kIsMobile || _compact)
+        ? await Sheet.showSheet(context, widget: LeadsViewPage(lead: lead))
+        : await GeneralDialog.showRTLSheet(context, LeadsViewPage(lead: lead));
+    if (result == 'deleted' && mounted) {
+      context.read<LeadBloc>().add(StreamLead());
+      showLeadDeletedUndo(
+        context,
+        lead,
+        () => context.read<LeadBloc>().add(StreamLead()),
+      );
+    }
+  }
+
+  Future<void> _openDeal(LeadModel lead) async {
+    try {
+      futureLoading(context);
+      String? dealUid = (lead.dealId ?? '').isNotEmpty ? lead.dealId : null;
+      if (dealUid != null) {
+        try {
+          await DealService.getDeal(uid: dealUid);
+        } catch (_) {
+          dealUid = null;
+        }
+      }
+      if (dealUid == null) {
+        // dealId is not always part of the list payload: look the deal up by
+        // the lead it was created from.
+        final deals = await DealService.getAllDeals();
+        dealUid = deals
+            .firstWhereOrNull((d) => d.leadId == lead.uid)
+            ?.uid;
+      }
+      if (mounted && Navigator.canPop(context)) Navigator.pop(context);
+      if (!mounted) return;
+      if (dealUid == null) {
+        FlushBar.show(context, 'Deal not found', isSuccess: false);
+        return;
+      }
+      final page = DealsListing(showAppBar: true, focusDealUid: dealUid);
+      if (kIsMobile || _compact) {
+        await Sheet.showSheet(context, widget: page);
+      } else {
+        await GeneralDialog.showRTLSheet(context, page);
+      }
+    } catch (e) {
+      if (mounted && Navigator.canPop(context)) Navigator.pop(context);
+      if (mounted) FlushBar.show(context, e.toString(), isSuccess: false);
+    }
+  }
+
+  Widget _buildRow(
+    BuildContext context,
+    LeadModel lead,
+    PaginatedDataController<LeadModel> controllerWatch,
+    PaginatedDataController<LeadModel> controllerRead,
+  ) {
+    final selected = controllerWatch.selectedIds.contains(lead.uid);
+    final priority = CacheService.leadPriorityByUid(lead.leadPriority);
+    final company = (lead.companyName ?? '').trim();
+    final mobile = (lead.clientMobile ?? '').isNotEmpty
+        ? lead.clientMobile!
+        : (lead.companyMobile ?? '');
+    const dash = Text('—', style: TextStyle(color: _muted, fontSize: 12));
+    const small = TextStyle(fontSize: 12, color: _ink);
+
+    return InkWell(
+      onTap: () => _openLead(lead),
+      child: Container(
+        height: 56,
+        decoration: BoxDecoration(
+          color: selected ? _blue.withValues(alpha: 0.05) : Colors.white,
+          border: const Border(bottom: BorderSide(color: Color(0xFFF1F5F9))),
+        ),
+        child: Row(
+          children: [
+            _cell(
+              0,
+              _canDelete && !lead.leadsConverted
+                  ? Checkbox(
+                      value: selected,
+                      visualDensity: VisualDensity.compact,
+                      onChanged: (v) =>
+                          controllerRead.onSelected(lead.uid ?? '', v),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+            _cell(
+              1,
+              _chip(
+                '#${lead.leadNumber ?? '—'}',
+                const Color(0xFFF1F5F9),
+                fg: _muted,
+                size: 10,
+              ),
+            ),
+            _cell(
+              2,
+              Row(
+                children: [
+                  _letterAvatar(lead.leadName),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          lead.leadName,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                            color: _ink,
+                          ),
+                        ),
+                        if (company.isNotEmpty)
+                          Text(
+                            company,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 10.5, color: _muted),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            _cell(
+              3,
+              lead.leadEmail.trim().isEmpty
+                  ? dash
+                  : Text(
+                      lead.leadEmail,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11.5, color: _muted),
+                    ),
+            ),
+            _cell(4, mobile.isEmpty ? dash : Text(mobile, style: small)),
+            _cell(
+              5,
+              Text(
+                _money.format(lead.leadValue),
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: _ink,
+                ),
+              ),
+            ),
+            _cell(
+              6,
+              lead.leadSource.name.isEmpty
+                  ? dash
+                  : _chip(
+                      lead.leadSource.name,
+                      const Color(0xFFF1F5F9),
+                      fg: _muted,
+                      size: 10,
+                    ),
+            ),
+            _cell(7, _statusCell(lead)),
+            _cell(
+              8,
+              priority == null
+                  ? dash
+                  : _chip(priority.name, Color(priority.color)),
+            ),
+            _cell(
+              9,
+              Text(DateFormat('dd MMM yyyy').format(lead.createdAt), style: small),
+            ),
+            _cell(10, _followUpCell(lead)),
+            _cell(
+              11,
+              Row(
+                children: [
+                  UserAvatar(userData: lead.createdBy, size: 22, showCrown: false),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      lead.createdBy.name,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: _ink,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            _cell(12, _rowActions(lead)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _rowActions(LeadModel lead) {
+    return Row(
+      children: [
+        _iconAction(Iconsax.eye, _blue, 'View', () => _openLead(lead)),
+        if (lead.leadsConverted)
+          InkWell(
+            onTap: () => _openDeal(lead),
+            borderRadius: BorderRadius.circular(6),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0FDF4),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: const Color(0xFF16A34A)),
+              ),
+              child: const Text(
+                'View Deal',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF15803D),
+                ),
+              ),
+            ),
+          )
+        else ...[
+          if (_canEdit)
+            _iconAction(Iconsax.edit, _blue, 'Edit', () async {
+              final result = (kIsMobile || _compact)
+                  ? await Sheet.showSheet(
+                      context,
+                      widget: LeadEdit(uid: lead.uid ?? ''),
+                    )
+                  : await GeneralDialog.showRTLSheet(
+                      context,
+                      LeadEdit(uid: lead.uid ?? ''),
+                    );
+              if (result == true && mounted) await _refreshLeads(context);
+            }),
+          if (_canEdit)
+            _iconAction(
+              Icons.autorenew_rounded,
+              const Color(0xFF16A34A),
+              'Convert to Deal',
+              () async {
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (_) => const ConfirmDialog(
+                    title: 'Convert $_pageTitle',
+                    content:
+                        'Are you sure you want to convert this lead to a deal?',
+                  ),
+                );
+                if (ok == true && mounted) {
+                  await _convertLeadToDeal(context, lead);
+                }
+              },
+            ),
+          if (_canDelete)
+            _iconAction(
+              Iconsax.trash,
+              const Color(0xFFDC2626),
+              'Delete',
+              () async {
+                final deleted = await confirmAndDeleteLead(context, lead);
+                if (deleted && mounted) {
+                  context.read<LeadBloc>().add(StreamLead());
+                  showLeadDeletedUndo(
+                    context,
+                    lead,
+                    () => context.read<LeadBloc>().add(StreamLead()),
+                  );
+                }
+              },
+            ),
+        ],
+      ],
     );
   }
 
@@ -659,120 +1203,186 @@ class _LeadsListingViewState extends State<LeadsListingView> {
   List<String> _distinct(Iterable<String> v) =>
       (v.where((e) => e.trim().isNotEmpty).toSet().toList()..sort());
 
+  // ---------------------------------------------------------------------
+  // Filters (reference layout: labelled grid, "All ..." placeholders)
+  // ---------------------------------------------------------------------
+  Widget _label(String t) => Padding(
+    padding: const EdgeInsets.only(bottom: 5),
+    child: Text(
+      t.toUpperCase(),
+      style: const TextStyle(
+        fontSize: 10,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.3,
+        color: _ink,
+      ),
+    ),
+  );
+
+  Widget _field({required String label, required Widget child}) {
+    return SizedBox(
+      width: _filterWidth,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [_label(label), child],
+      ),
+    );
+  }
+
+  InputDecoration _boxDecoration(String hint, {Widget? suffix}) {
+    return InputDecoration(
+      isDense: true,
+      hintText: hint,
+      hintStyle: const TextStyle(fontSize: 12, color: _muted),
+      suffixIcon: suffix,
+      filled: true,
+      fillColor: Colors.white,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: _line),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: _line),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: _blue, width: 1.2),
+      ),
+    );
+  }
+
+  Widget _selectFilter({
+    required String label,
+    required String allLabel,
+    required String? value,
+    required List<String> items,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return _field(
+      label: label,
+      child: CustomSearchableDropdown<String>(
+        key: ValueKey('$label-$_resetCount'),
+        items: items,
+        initialValue: value,
+        hintText: allLabel,
+        height: 36,
+        onChanged: onChanged,
+      ),
+    );
+  }
+
+  String _fmtDate(DateTime? d) => d == null
+      ? 'dd-mm-yyyy'
+      : '${d.day.toString().padLeft(2, '0')}-'
+            '${d.month.toString().padLeft(2, '0')}-${d.year}';
+
+  Widget _dateField(String label, DateTime? value, ValueChanged<DateTime> set) {
+    return _field(
+      label: label,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () async {
+          final picked = await showDatePicker(
+            context: context,
+            firstDate: DateTime(2000),
+            lastDate: DateTime(2100),
+            initialDate: value ?? DateTime.now(),
+          );
+          if (picked != null) {
+            set(picked);
+            _applyFilters();
+          }
+        },
+        child: Container(
+          height: 36,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: _line),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _fmtDate(value),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: value == null ? _muted : _ink,
+                  ),
+                ),
+              ),
+              const Icon(Iconsax.calendar_1, size: 15, color: _muted),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildFilterRow({required ValueChanged<String> onSearchChanged}) {
+    final w = MediaQuery.of(context).size.width;
     if (_compact) {
-      final available = MediaQuery.of(context).size.width - 28 - 32;
+      final available = w - 28 - 32;
       final cols = available >= 2 * 170 + 10 ? 2 : 1;
       _filterWidth = (available - (cols - 1) * 10) / cols;
     } else {
-      _filterWidth = 180;
+      // Sidebar + page padding are already excluded by LayoutBuilder in
+      // build(); 6 columns like the reference.
+      final inner = (_contentWidth - 48 - 32).clamp(600.0, 4000.0);
+      _filterWidth = (inner - 5 * 14) / 6;
     }
-    if (!Hive.isBoxOpen('leadStatus') ||
-        !Hive.isBoxOpen('employees')) {
+
+    if (!Hive.isBoxOpen('leadStatus') || !Hive.isBoxOpen('employees')) {
       return _buildSearchField(onSearchChanged);
     }
 
     final statusBox = Hive.box<Map<dynamic, dynamic>>('leadStatus');
     final cache = CacheService();
+    final employees = cache.getAllListenableEmployees().value;
+    final statusName = _selectedStatus == null || _selectedStatus!.isEmpty
+        ? null
+        : CacheService.leadStatusByUid(_selectedStatus!)?.name;
+    final createdByName = employees
+        .firstWhereOrNull((e) => e.uid == _selectedCreatedBy)
+        ?.name;
+    final followUpName = employees
+        .firstWhereOrNull((e) => e.uid == _selectedFollowUp)
+        ?.name;
 
-    final filters = [
-      _dateFilter(
-        label: "From Date",
-        value: _fromDate,
-        onTap: () async {
-          final picked = await showDatePicker(
-            context: context,
-            firstDate: DateTime(2000),
-            lastDate: DateTime(2100),
-            initialDate: _fromDate ?? DateTime.now(),
-          );
-
-          if (picked != null) {
-            setState(() => _fromDate = picked);
-            _applyFilters();
-          }
-        },
-      ),
-
-      _dateFilter(
-        label: "To Date",
-        value: _toDate,
-        onTap: () async {
-          final picked = await showDatePicker(
-            context: context,
-            firstDate: DateTime(2000),
-            lastDate: DateTime(2100),
-            initialDate: _toDate ?? DateTime.now(),
-          );
-
-          if (picked != null) {
-            setState(() => _toDate = picked);
-            _applyFilters();
-          }
-        },
-      ),
-
-      _filterDropdown(
-        label: "Status",
-        value: _selectedStatus != null
-            ? LeadStatusModel.fromMap(
-                _selectedStatus!,
-                Map<String, dynamic>.from(
-                  statusBox.get(_selectedStatus!) ?? {},
-                ),
-              ).name
-            : null,
+    final filters = <Widget>[
+      _dateField('From Date', _fromDate, (d) => setState(() => _fromDate = d)),
+      _dateField('To Date', _toDate, (d) => setState(() => _toDate = d)),
+      _selectFilter(
+        label: 'Status',
+        allLabel: 'All Status',
+        value: statusName,
         items: statusItems(statusBox),
         onChanged: (v) {
-          final selectedModel = statusBox.keys.firstWhere(
-            (key) =>
-                LeadStatusModel.fromMap(
-                  key,
-                  Map<String, dynamic>.from(statusBox.get(key) ?? {}),
-                ).name ==
-                v,
-            orElse: () => '',
+          final key = v == null
+              ? null
+              : statusBox.keys.firstWhere(
+                  (k) =>
+                      LeadStatusModel.fromMap(
+                        k,
+                        Map<String, dynamic>.from(statusBox.get(k) ?? {}),
+                      ).name ==
+                      v,
+                  orElse: () => '',
+                );
+          setState(
+            () => _selectedStatus = (key == null || key == '')
+                ? null
+                : key.toString(),
           );
-
-          setState(() => _selectedStatus = selectedModel);
           _applyFilters();
         },
       ),
-
-      _filterDropdown(
-        label: "Created By",
-        value: _selectedCreatedBy != null
-            ? cache
-                  .getAllListenableEmployees()
-                  .value
-                  .firstWhere((e) => e.uid == _selectedCreatedBy)
-                  .name
-            : null,
-        items: employeeItems(cache),
-        onChanged: (v) {
-          final selectedEmployee = cache
-              .getAllListenableEmployees()
-              .value
-              .firstWhereOrNull((e) => e.name == v);
-
-          setState(() => _selectedCreatedBy = selectedEmployee?.uid);
-
-          _applyFilters();
-        },
-      ),
-
-      _filterDropdown(
-        label: "Lead Source",
-        value: _selectedSource,
-        items: _distinct([..._sourceOptions, ..._allLeads.map((l) => l.leadSource.name)]),
-        onChanged: (v) {
-          setState(() => _selectedSource = v);
-          _applyFilters();
-        },
-      ),
-
-      _filterDropdown(
-        label: "Lead Priority",
+      _selectFilter(
+        label: 'Priority',
+        allLabel: 'All Prioritys',
         value: _selectedPriority,
         items: _distinct([..._priorityOptions, ..._allLeads.map(_priorityName)]),
         onChanged: (v) {
@@ -780,9 +1390,22 @@ class _LeadsListingViewState extends State<LeadsListingView> {
           _applyFilters();
         },
       ),
-
-      _filterDropdown(
-        label: "Master Client",
+      _selectFilter(
+        label: 'Source',
+        allLabel: 'All Sources',
+        value: _selectedSource,
+        items: _distinct([
+          ..._sourceOptions,
+          ..._allLeads.map((l) => l.leadSource.name),
+        ]),
+        onChanged: (v) {
+          setState(() => _selectedSource = v);
+          _applyFilters();
+        },
+      ),
+      _selectFilter(
+        label: 'Master Client',
+        allLabel: 'All Clients',
         value: _selectedClient == null
             ? null
             : _masterClients
@@ -798,19 +1421,49 @@ class _LeadsListingViewState extends State<LeadsListingView> {
           _applyFilters();
         },
       ),
-
-      _filterDropdown(
-        label: "Project Name",
+      _selectFilter(
+        label: 'Created By',
+        allLabel: 'All Creators',
+        value: createdByName,
+        items: employeeItems(cache),
+        onChanged: (v) {
+          setState(
+            () => _selectedCreatedBy = v == null
+                ? null
+                : employees.firstWhereOrNull((e) => e.name == v)?.uid,
+          );
+          _applyFilters();
+        },
+      ),
+      _selectFilter(
+        label: 'Follow Up',
+        allLabel: 'All Follow Ups',
+        value: followUpName,
+        items: employeeItems(cache),
+        onChanged: (v) {
+          setState(
+            () => _selectedFollowUp = v == null
+                ? null
+                : employees.firstWhereOrNull((e) => e.name == v)?.uid,
+          );
+          _applyFilters();
+        },
+      ),
+      _selectFilter(
+        label: 'Project Name',
+        allLabel: 'All Projects',
         value: _selectedProject,
-        items: _distinct(_allLeads.map((l) => l.projectName ?? '')),
+        items: _distinct(
+          _allLeads.map((l) => (l.projectName ?? '').trim()),
+        ).where((e) => e.isNotEmpty).toList(),
         onChanged: (v) {
           setState(() => _selectedProject = v);
           _applyFilters();
         },
       ),
-
-      _filterDropdown(
-        label: "Converted",
+      _selectFilter(
+        label: 'Conversion',
+        allLabel: 'All Leads',
         value: _selectedConverted,
         items: const ['Converted', 'Not Converted'],
         onChanged: (v) {
@@ -818,28 +1471,27 @@ class _LeadsListingViewState extends State<LeadsListingView> {
           _applyFilters();
         },
       ),
-
-      _valueFilter(onChanged: _onValueChanged),
+      _field(
+        label: 'Exact Value (₹)',
+        child: SizedBox(
+          height: 36,
+          child: TextField(
+            key: ValueKey('value-$_resetCount'),
+            keyboardType: TextInputType.number,
+            style: const TextStyle(fontSize: 12),
+            decoration: _boxDecoration('e.g. 50000'),
+            onChanged: _onValueChanged,
+          ),
+        ),
+      ),
     ];
 
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-        boxShadow: [
-          BoxShadow(
-            color: Theme.of(context).colorScheme.shadow.withValues(alpha: 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+      decoration: _cardDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          /// Search + reset
           if (_compact) ...[
             _buildSearchField(onSearchChanged),
             const SizedBox(height: 12),
@@ -860,7 +1512,7 @@ class _LeadsListingViewState extends State<LeadsListingView> {
                       label: Text(_filtersExpanded ? 'Hide Filters' : 'Filters'),
                       style: OutlinedButton.styleFrom(
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(10),
                         ),
                       ),
                     ),
@@ -877,26 +1529,13 @@ class _LeadsListingViewState extends State<LeadsListingView> {
           ] else ...[
             Row(
               children: [
-                SizedBox(width: 280, child: _buildSearchField(onSearchChanged)),
+                SizedBox(width: 250, child: _buildSearchField(onSearchChanged)),
                 const Spacer(),
                 _buildResetButton(),
               ],
             ),
-            const SizedBox(height: 16),
-            Scrollbar(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    for (final filter in filters) ...[
-                      filter,
-                      const SizedBox(width: 10),
-                    ],
-                  ],
-                ),
-              ),
-            ),
+            const SizedBox(height: 14),
+            Wrap(spacing: 14, runSpacing: 12, children: filters),
           ],
         ],
       ),
@@ -905,19 +1544,17 @@ class _LeadsListingViewState extends State<LeadsListingView> {
 
   Widget _buildResetButton() {
     return SizedBox(
-      height: 40,
-      child: ElevatedButton.icon(
+      height: 34,
+      child: OutlinedButton.icon(
         onPressed: _resetFilters,
-        icon: const Icon(Icons.refresh, size: 18),
-        label: const Text("Reset Filters"),
-        style: ElevatedButton.styleFrom(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          backgroundColor: Theme.of(
-            context,
-          ).colorScheme.errorContainer.withValues(alpha: 0.5),
-          foregroundColor: Theme.of(context).colorScheme.error,
-          elevation: 0,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+        icon: const Icon(Icons.refresh, size: 15),
+        label: const Text('Reset Filters', style: TextStyle(fontSize: 12)),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFFDC2626),
+          backgroundColor: const Color(0xFFFEF2F2),
+          side: const BorderSide(color: Color(0xFFFECACA)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
         ),
       ),
     );
@@ -925,39 +1562,20 @@ class _LeadsListingViewState extends State<LeadsListingView> {
 
   Widget _buildSearchField(ValueChanged<String> onSearchChanged) {
     return SizedBox(
-      height: 48,
+      height: 36,
       child: TextField(
         controller: _searchController,
+        style: const TextStyle(fontSize: 12.5),
         onChanged: (value) {
           setState(() {});
           onSearchChanged(value);
           _applyFilters();
         },
-        decoration: InputDecoration(
-          hintText: 'Search leads...',
-          prefixIcon: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Color(0xFF0052D4), Color(0xFF4364F7)],
-                ),
-                shape: BoxShape.circle,
-              ),
-              child: const Padding(
-                padding: EdgeInsets.all(5),
-                child: Icon(
-                  Iconsax.search_normal_1,
-                  size: 12,
-                  color: AppColors.white,
-                ),
-              ),
-            ),
-          ),
-
-          suffixIcon: _searchController.text.isNotEmpty
+        decoration: _boxDecoration(
+          'Search leads...',
+          suffix: _searchController.text.isNotEmpty
               ? IconButton(
-                  icon: const Icon(Icons.close, size: 18),
+                  icon: const Icon(Icons.close, size: 16),
                   onPressed: () {
                     _searchController.clear();
                     setState(() {});
@@ -966,204 +1584,17 @@ class _LeadsListingViewState extends State<LeadsListingView> {
                   },
                 )
               : null,
-
-          filled: true,
-          fillColor: Theme.of(context).colorScheme.surface,
-
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide(
-              color: Theme.of(context).colorScheme.outlineVariant,
-            ),
-          ),
-
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide(
-              color: Theme.of(context).colorScheme.outlineVariant,
-            ),
-          ),
-
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide(
-              color: Theme.of(context).colorScheme.primary,
-              width: 1.3,
-            ),
-          ),
-
-          hintStyle: TextStyle(
-            color: Theme.of(
-              context,
-            ).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
-            fontSize: 14,
-          ),
+        ).copyWith(
+          prefixIcon: const Icon(Iconsax.search_normal_1, size: 15, color: _muted),
         ),
       ),
     );
   }
 
-  Widget _valueFilter({
-    required ValueChanged<String> onChanged,
-    double? itemWidth,
-  }) {
-    return SizedBox(
-      width: itemWidth ?? _filterWidth,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            "Lead Value",
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: Theme.of(context).colorScheme.onSurface,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-
-          const SizedBox(height: 8),
-          Container(
-            height: 32,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: Theme.of(context).colorScheme.outlineVariant,
-              ),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Row(
-              children: [
-                // Icon(
-                //   Icons.currency_rupee,
-                //   size: 18,
-                //   color: Colors.grey.shade600,
-                // ),
-                // const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    keyboardType: TextInputType.number,
-                    onChanged: onChanged,
-                    style: Theme.of(context).textTheme.bodySmall,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      // hintText: "1000 - 5000",
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.zero,
-                      fillColor: Colors.transparent,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _onValueChanged(String value) {
-    _value = null;
-
-    final cleaned = value.replaceAll(' ', '');
-    if (cleaned.isEmpty) {
-      _applyFilters();
-      return;
-    }
-
-    final parsedValue = double.tryParse(cleaned);
-    if (parsedValue == null) {
-      _applyFilters();
-      return;
-    }
-
-    _value = parsedValue;
-
+    final cleaned = value.replaceAll(RegExp(r'[\s,]'), '');
+    _value = cleaned.isEmpty ? null : double.tryParse(cleaned);
     _applyFilters();
-  }
-
-  Widget _dateFilter({
-    required String label,
-    required DateTime? value,
-    required VoidCallback onTap,
-    double? itemWidth,
-  }) {
-    return SizedBox(
-      width: itemWidth ?? _filterWidth,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: Theme.of(context).colorScheme.onSurface,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 8),
-          GestureDetector(
-            onTap: onTap,
-            child: Container(
-              height: 32,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: Theme.of(context).colorScheme.outlineVariant,
-                ),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Iconsax.calendar_1,
-                    size: 18,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      value == null
-                          ? "Select $label"
-                          : "${value.day.toString().padLeft(2, '0')}/"
-                                "${value.month.toString().padLeft(2, '0')}/"
-                                "${value.year}",
-                      style: Theme.of(context).textTheme.bodySmall,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  Icon(
-                    Icons.arrow_drop_down,
-                    color: Theme.of(context).colorScheme.onSurface,
-                    size: 18,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _filterDropdown({
-    required String label,
-    required String? value,
-    required List<String> items,
-    required ValueChanged<String?> onChanged,
-    double? itemWidth,
-  }) {
-    return SizedBox(
-      width: itemWidth ?? _filterWidth,
-      child: FormDropdownSearch(
-        label: label,
-        items: items,
-        initialItem: value,
-        onChanged: (dynamic val) {
-          onChanged(val as String?);
-        },
-        validator: (val) => val == null ? "* Required" : null,
-      ),
-    );
   }
 
   void _applyFilters() {
@@ -1192,7 +1623,8 @@ class _LeadsListingViewState extends State<LeadsListingView> {
     }
 
     if (_toDate != null) {
-      filtered = filtered.where((e) => !e.createdAt.isAfter(_toDate!)).toList();
+      final end = DateTime(_toDate!.year, _toDate!.month, _toDate!.day, 23, 59, 59);
+      filtered = filtered.where((e) => !e.createdAt.isAfter(end)).toList();
     }
 
     if (_selectedStatus != null) {
@@ -1243,6 +1675,10 @@ class _LeadsListingViewState extends State<LeadsListingView> {
       filtered = filtered
           .where((e) => (e.projectName ?? '') == _selectedProject)
           .toList();
+    }
+
+    if (_selectedFollowUp != null) {
+      filtered = filtered.where((e) => e.followUp == _selectedFollowUp).toList();
     }
 
     if (_selectedConverted != null) {
@@ -1349,7 +1785,7 @@ class _LeadsListingViewState extends State<LeadsListingView> {
                     .where((l) => !l.leadsConverted)
                     .map((l) => l.uid ?? ''),
               ),
-              child: Text('Select all $total'),
+              child: const Text('Select all'),
             ),
           TextButton(
             onPressed: controllerRead.clearSelection,
@@ -1375,311 +1811,193 @@ class _LeadsListingViewState extends State<LeadsListingView> {
     );
   }
 
-  Widget _buildActionRow(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final List<Widget> actionButtons = [];
-
-        // ADD BUTTON
-        if (permissions?.canCreate ?? false) {
-          actionButtons.add(
-            ElevatedButton.icon(
-              onPressed: () async {
-                final result = (kIsMobile || _compact)
-                    ? await Sheet.showSheet(context, widget: const LeadCreate())
-                    : await GeneralDialog.showRTLSheet(
-                        context,
-                        const LeadCreate(),
-                      );
-                if (result == true && context.mounted) {
-                  context.read<LeadBloc>().add(StreamLead());
-                }
-              },
-              icon: const Icon(Icons.add, size: 18),
-              label: Text("Add $_pageTitle"),
-              style: ElevatedButton.styleFrom(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                backgroundColor: const Color(0xFF4364F7),
-                foregroundColor: Colors.white,
-              ),
-            ),
-          );
-        }
-
-        if (permissions?.canImport ?? false) {
-          actionButtons.add(const SizedBox(width: 10));
-          actionButtons.add(
-            ElevatedButton.icon(
-              onPressed: () {
-                if (kIsMobile || _compact) {
-                  Sheet.showSheet(context, widget: const LeadUpload());
-                } else {
-                  GeneralDialog.showRTLSheet(context, const LeadUpload());
-                }
-              },
-              icon: const Icon(Iconsax.cloud_plus, size: 18),
-              label: const Text("Upload"),
-              style: ElevatedButton.styleFrom(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                backgroundColor: Theme.of(context).colorScheme.secondary,
-                foregroundColor: Theme.of(context).colorScheme.onSecondary,
-              ),
-            ),
-          );
-        }
-
-        // TEMPLATE / SAMPLE DATA: only useful (and only shown) with import access
-        if (permissions?.canImport ?? false) {
-          actionButtons.add(const SizedBox(width: 10));
-
-          actionButtons.add(
-            OutlinedButton.icon(
-              onPressed: () async {
-                await Download.downloadFromAsset(
-                  context,
-                  "assets/templates/lead_upload_template.xlsx",
-                  "Lead_Template.xlsx",
-                );
-              },
-              icon: const Icon(Icons.file_download_outlined, size: 18),
-              label: const Text("Template"),
-              style: OutlinedButton.styleFrom(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                foregroundColor: Theme.of(context).colorScheme.primary,
-                side: BorderSide(color: Theme.of(context).colorScheme.primary),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              ),
-            ),
-          );
-
-          // SAMPLE DATA BUTTON (template pre-filled with example leads)
-          actionButtons.add(const SizedBox(width: 10));
-          actionButtons.add(
-            OutlinedButton.icon(
-              onPressed: () async {
-                await Download.downloadFromAsset(
-                  context,
-                  "assets/templates/lead_upload_template_with_data.xlsx",
-                  "Lead_Sample_Data.xlsx",
-                );
-              },
-              icon: const Icon(Icons.contact_page_outlined, size: 18),
-              label: const Text("Sample Data"),
-              style: OutlinedButton.styleFrom(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                foregroundColor: Theme.of(context).colorScheme.secondary,
-                side: BorderSide(color: Theme.of(context).colorScheme.secondary),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              ),
-            ),
-          );
-        }
-
-        // EXPORT BUTTON
-        if ((permissions?.canExport ?? false) && _filteredLeads.isNotEmpty) {
-          actionButtons.add(const SizedBox(width: 10));
-          actionButtons.add(
-            ElevatedButton.icon(
-              label: const Text("Export"),
-              icon: const Icon(Iconsax.export_3, size: 18),
-              style: ElevatedButton.styleFrom(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                backgroundColor: Theme.of(
-                  context,
-                ).colorScheme.surfaceContainerHighest,
-                foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-              onPressed: () async {
-                try {
-                  // Fetch all priorities and statuses
-                  final priorities =
-                      await LeadPriorityService.getAllLeadPriority();
-                  final statuses = await LeadStatusService.getAllLeadStatus();
-
-                  List<List<String>> exportData = [];
-                  exportData.add([
-                    'Lead Name',
-                    'Email',
-                    'Source',
-                    'Priority',
-                    'Value',
-                    'Status',
-                    'Company',
-                    'Mobile',
-                    'Country',
-                    'State',
-                    'City',
-                    'Address',
-                    'Notes',
-                    'Created At',
-                  ]);
-
-                  for (var lead in _filteredLeads) {
-                    final priority = priorities.firstWhere(
-                      (p) => p.uid == lead.leadPriority,
-                      orElse: () => LeadPriorityModel(
-                        name: lead.leadPriority,
-                        description: '',
-                        color: 0,
-                        createdBy: UserDataModel.fromEmptyMap(),
-                      ),
-                    );
-                    final status = statuses.firstWhere(
-                      (s) => s.uid == lead.leadStatus,
-                      orElse: () => LeadStatusModel(
-                        name: lead.leadStatus,
-                        description: '',
-                        color: 0,
-                        orderNumber: 0,
-                        createdBy: UserDataModel.fromEmptyMap(),
-                      ),
-                    );
-
-                    exportData.add([
-                      lead.leadName,
-                      lead.leadEmail,
-                      lead.leadSource.name,
-                      priority.name,
-                      lead.leadValue.toString(),
-                      status.name,
-                      lead.companyName ?? '',
-                      lead.companyMobile ?? '',
-                      lead.companyCountry?.name ?? '',
-                      lead.companyState?.name ?? '',
-                      lead.companyCity?.name ?? '',
-                      lead.companyAddress ?? '',
-                      lead.notes,
-                      lead.createdAt.formatDateTime,
-                    ]);
-                  }
-
-                  var fileBytes = await XlsxWriter().create(exportData);
-                  var filePath = await saveFileToDownloads(
-                    fileBytes,
-                    fileName:
-                        'Leads_Export_${DateTime.now().millisecondsSinceEpoch}.xlsx',
-                  );
-                  if (!kIsWeb) openfile(filePath, context);
-                  if (context.mounted) {
-                    FlushBar.show(
-                      context,
-                      'Leads exported successfully',
-                      isSuccess: true,
-                    );
-                  }
-                } catch (e) {
-                  FlushBar.show(context, e.toString(), isSuccess: false);
-                }
-              },
-            ),
-          );
-        }
-
-
-        // 2. View toggle (Grid / List / Calendar)
-        final viewToggle = Container(
-          height: 42,
-          padding: const EdgeInsets.all(3),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(12),
+  // ---------------------------------------------------------------------
+  // Action row (reference: Add Lead | Upload | Template | Export | Status
+  // Graph ........ refresh | List | Board | Calendar | Graph)
+  // ---------------------------------------------------------------------
+  Widget _toolButton({
+    required String label,
+    required IconData icon,
+    required VoidCallback? onPressed,
+    bool primary = false,
+  }) {
+    final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(8));
+    if (primary) {
+      return SizedBox(
+        height: 34,
+        child: ElevatedButton.icon(
+          onPressed: onPressed,
+          icon: Icon(icon, size: 16),
+          label: Text(label, style: const TextStyle(fontSize: 12.5)),
+          style: ElevatedButton.styleFrom(
+            elevation: 0,
+            shape: shape,
+            backgroundColor: _blue,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
           ),
-          child: Row(
-            mainAxisSize: _compact ? MainAxisSize.max : MainAxisSize.min,
-            children: [
-              if (!_compact)
-                IconButton(
-                  tooltip: "Refresh",
-                  icon: const Icon(Iconsax.refresh),
-                  iconSize: 18,
-                  onPressed: () => _refreshLeads(context),
-                ),
-              _buildToggleIcon(Iconsax.grid_3, 'Grid', 'Board'),
-              _buildToggleIcon(Icons.list, 'List', 'List'),
-              _buildToggleIcon(Iconsax.calendar_1, 'Calendar', 'Calendar'),
-            ],
-          ),
-        );
-
-        // 3. Layout
-        if (_compact) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(children: actionButtons),
-              ),
-              const SizedBox(height: 12),
-              viewToggle,
-            ],
-          );
-        } else {
-          return Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Flexible(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(children: actionButtons),
-                ),
-              ),
-              const SizedBox(width: 12),
-              viewToggle,
-            ],
-          );
-        }
-      },
+        ),
+      );
+    }
+    return SizedBox(
+      height: 34,
+      child: OutlinedButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, size: 15),
+        label: Text(label, style: const TextStyle(fontSize: 12.5)),
+        style: OutlinedButton.styleFrom(
+          shape: shape,
+          foregroundColor: _ink,
+          backgroundColor: Colors.white,
+          side: const BorderSide(color: _line),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+        ),
+      ),
     );
   }
 
-  // Helper for the View Toggle segments
-  Widget _buildToggleIcon(IconData icon, String viewName, String label) {
-    final selected = _selectedView == viewName;
-    final scheme = Theme.of(context).colorScheme;
-    final child = AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      padding: EdgeInsets.symmetric(horizontal: _compact ? 10 : 14),
+  Widget _buildActionRow(BuildContext context) {
+    final buttons = <Widget>[];
+    void gap() => buttons.add(const SizedBox(width: 8));
+
+    if (permissions?.canCreate ?? false) {
+      buttons.add(
+        _toolButton(
+          label: 'Add Lead',
+          icon: Icons.add,
+          primary: true,
+          onPressed: () async {
+            final result = (kIsMobile || _compact)
+                ? await Sheet.showSheet(context, widget: const LeadCreate())
+                : await GeneralDialog.showRTLSheet(context, const LeadCreate());
+            if (result == true && context.mounted) {
+              context.read<LeadBloc>().add(StreamLead());
+            }
+          },
+        ),
+      );
+    }
+
+    if (permissions?.canImport ?? false) {
+      gap();
+      buttons.add(
+        _toolButton(
+          label: 'Upload',
+          icon: Iconsax.cloud_plus,
+          onPressed: () {
+            if (kIsMobile || _compact) {
+              Sheet.showSheet(context, widget: const LeadUpload());
+            } else {
+              GeneralDialog.showRTLSheet(context, const LeadUpload());
+            }
+          },
+        ),
+      );
+      gap();
+      buttons.add(
+        PopupMenuButton<String>(
+          tooltip: 'Templates',
+          offset: const Offset(0, 38),
+          onSelected: (v) async {
+            if (v == 'template') {
+              await Download.downloadFromAsset(
+                context,
+                'assets/templates/lead_upload_template.xlsx',
+                'Lead_Template.xlsx',
+              );
+            } else {
+              await Download.downloadFromAsset(
+                context,
+                'assets/templates/lead_upload_template_with_data.xlsx',
+                'Lead_Sample_Data.xlsx',
+              );
+            }
+          },
+          itemBuilder: (_) => const [
+            PopupMenuItem(value: 'template', child: Text('Lead Template')),
+            PopupMenuItem(value: 'sample', child: Text('Sample Data')),
+          ],
+          child: IgnorePointer(
+            child: _toolButton(
+              label: 'Template ▾',
+              icon: Icons.file_download_outlined,
+              onPressed: () {},
+            ),
+          ),
+        ),
+      );
+    }
+
+    if ((permissions?.canExport ?? false) && _filteredLeads.isNotEmpty) {
+      gap();
+      buttons.add(
+        _toolButton(
+          label: 'Export',
+          icon: Iconsax.export_3,
+          onPressed: _exportLeads,
+        ),
+      );
+    }
+
+    final viewToggle = Container(
+      height: 36,
+      padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
-        gradient: selected ? const LinearGradient(colors: _brandGradient) : null,
-        borderRadius: BorderRadius.circular(10),
-        boxShadow: selected
-            ? [
-                BoxShadow(
-                  color: const Color(0xFF4364F7).withValues(alpha: 0.3),
-                  blurRadius: 8,
-                  offset: const Offset(0, 3),
-                ),
-              ]
-            : null,
+        color: const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _line),
       ),
-      alignment: Alignment.center,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            size: 17,
-            color: selected ? Colors.white : scheme.onSurfaceVariant,
-          ),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              fontWeight: FontWeight.w600,
-              color: selected ? Colors.white : scheme.onSurfaceVariant,
+          InkWell(
+            onTap: () => _refreshLeads(context),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 8),
+              child: Icon(Iconsax.refresh, size: 15, color: _muted),
             ),
           ),
+          _buildToggleIcon(Icons.list, 'List', 'List'),
+          _buildToggleIcon(Iconsax.grid_3, 'Grid', 'Board'),
+          _buildToggleIcon(Iconsax.calendar_1, 'Calendar', 'Calendar'),
+          _buildToggleIcon(Iconsax.chart_2, 'Graph', 'Graph'),
         ],
       ),
     );
-    final tap = GestureDetector(
+
+    if (_compact) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: buttons),
+          ),
+          const SizedBox(height: 10),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: viewToggle,
+          ),
+        ],
+      );
+    }
+    return Row(
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: buttons),
+          ),
+        ),
+        const SizedBox(width: 12),
+        viewToggle,
+      ],
+    );
+  }
+
+  Widget _buildToggleIcon(IconData icon, String viewName, String label) {
+    final selected = _selectedView == viewName;
+    return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {
         if (viewName != 'List') {
@@ -1687,207 +2005,102 @@ class _LeadsListingViewState extends State<LeadsListingView> {
         }
         setState(() => _selectedView = viewName);
       },
-      child: child,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: selected ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.08),
+                    blurRadius: 4,
+                    offset: const Offset(0, 1),
+                  ),
+                ]
+              : null,
+        ),
+        alignment: Alignment.center,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: selected ? _blue : _muted),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: selected ? _blue : _muted,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
-    return _compact ? Expanded(child: tap) : tap;
   }
 
-  DataRow _buildDataRow(
-    BuildContext context,
-    LeadModel lead,
-    PaginatedDataController<LeadModel> controllerWatch,
-    PaginatedDataController<LeadModel> controllerRead,
-  ) {
-    bool isSelected = controllerWatch.selectedIds.contains(lead.uid);
+  Future<void> _exportLeads() async {
+    try {
+      final priorities = await LeadPriorityService.getAllLeadPriority();
+      final statuses = await LeadStatusService.getAllLeadStatus();
 
-    /// Open Lead View
-    void openLead(BuildContext context, LeadModel lead) async {
-      final result = (kIsMobile || _compact)
-          ? await Sheet.showSheet(context, widget: LeadsViewPage(lead: lead))
-          : await GeneralDialog.showRTLSheet(
-              context,
-              LeadsViewPage(lead: lead),
-            );
+      final exportData = <List<String>>[
+        [
+          'Lead Name',
+          'Email',
+          'Source',
+          'Priority',
+          'Value',
+          'Status',
+          'Company',
+          'Mobile',
+          'Country',
+          'State',
+          'City',
+          'Address',
+          'Notes',
+          'Created At',
+        ],
+      ];
 
-      if (result == 'deleted' && context.mounted) {
-        context.read<LeadBloc>().add(StreamLead());
-        showLeadDeletedUndo(
-          context,
-          lead,
-          () => context.read<LeadBloc>().add(StreamLead()),
+      for (final lead in _filteredLeads) {
+        final priority = priorities.firstWhereOrNull(
+          (p) => p.uid == lead.leadPriority,
         );
+        final status = statuses.firstWhereOrNull(
+          (s) => s.uid == lead.leadStatus,
+        );
+        exportData.add([
+          lead.leadName,
+          lead.leadEmail,
+          lead.leadSource.name,
+          priority?.name ?? lead.leadPriority,
+          lead.leadValue.toString(),
+          status?.name ?? lead.leadStatus,
+          lead.companyName ?? '',
+          lead.companyMobile ?? '',
+          lead.companyCountry?.name ?? '',
+          lead.companyState?.name ?? '',
+          lead.companyCity?.name ?? '',
+          lead.companyAddress ?? '',
+          lead.notes,
+          lead.createdAt.formatDateTime,
+        ]);
       }
-    }
 
-    /// Reusable tappable DataCell
-    DataCell dataCell(BuildContext context, Widget child) {
-      return DataCell(
-        InkWell(
-          onTap: () => openLead(context, lead),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: child,
-          ),
-        ),
+      final fileBytes = await XlsxWriter().create(exportData);
+      final filePath = await saveFileToDownloads(
+        fileBytes,
+        fileName: 'Leads_Export_${DateTime.now().millisecondsSinceEpoch}.xlsx',
       );
+      if (!kIsWeb && mounted) openfile(filePath, context);
+      if (mounted) {
+        FlushBar.show(context, 'Leads exported successfully', isSuccess: true);
+      }
+    } catch (e) {
+      if (mounted) FlushBar.show(context, e.toString(), isSuccess: false);
     }
-
-    return DataRow(
-      selected: isSelected,
-      // A converted lead is locked: it cannot be selected for bulk delete.
-      onSelectChanged: (_canDelete && !lead.leadsConverted)
-          ? (selected) => controllerRead.onSelected(lead.uid ?? '', selected)
-          : null,
-      cells: [
-        /// Lead Number
-        dataCell(
-          context,
-          Text(
-            lead.leadNumber?.toString() ?? '—',
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w500),
-          ),
-        ),
-
-        /// Lead Name
-        dataCell(
-          context,
-          Text(
-            lead.leadName,
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w500),
-          ),
-        ),
-
-        /// Email
-        dataCell(
-          context,
-          Text(lead.leadEmail, style: Theme.of(context).textTheme.bodySmall),
-        ),
-
-        /// Mobile No (from the master client)
-        dataCell(
-          context,
-          Text(
-            (lead.clientMobile ?? '').isNotEmpty
-                ? lead.clientMobile!
-                : (lead.companyMobile ?? ''),
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ),
-
-        /// Lead Value
-        dataCell(
-          context,
-          Text(
-            lead.leadValue.toString(),
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ),
-
-        /// Source
-        dataCell(
-          context,
-          Text(
-            lead.leadSource.name,
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ),
-
-        /// Status
-        dataCell(
-          context,
-          Text(
-            CacheService.leadStatusByUid(lead.leadStatus)?.name ?? '',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ),
-
-        /// Created At
-        dataCell(
-          context,
-          Text(
-            lead.createdAt.listingDateTime,
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ),
-
-        /// Created By
-        dataCell(context, CreatedByWidget(userData: lead.createdBy)),
-
-        /// Actions (❌ no row tap here)
-        DataCell(
-          Row(
-            children: [
-              if (_canEdit && !lead.leadsConverted) ...[
-                IconButton(
-                  icon: const Icon(Iconsax.edit),
-                  color: Theme.of(context).colorScheme.primary,
-                  splashRadius: 20,
-                  onPressed: () async {
-                    final result = (kIsMobile || _compact)
-                        ? await Sheet.showSheet(
-                            context,
-                            widget: LeadEdit(uid: lead.uid ?? ''),
-                          )
-                        : await GeneralDialog.showRTLSheet(
-                            context,
-                            LeadEdit(uid: lead.uid ?? ''),
-                          );
-                    if (result == true && context.mounted) {
-                      await _refreshLeads(context);
-                    }
-                  },
-                ),
-              ],
-
-              if (_canDelete && !lead.leadsConverted)
-                IconButton(
-                  icon: const Icon(Iconsax.trash),
-                  tooltip: 'Delete $_pageTitle',
-                  color: Theme.of(context).colorScheme.error,
-                  splashRadius: 20,
-                  onPressed: () async {
-                    final deleted = await confirmAndDeleteLead(context, lead);
-                    if (deleted && context.mounted) {
-                      context.read<LeadBloc>().add(StreamLead());
-                      showLeadDeletedUndo(
-                        context,
-                        lead,
-                        () => context.read<LeadBloc>().add(StreamLead()),
-                      );
-                    }
-                  },
-                ),
-
-              if (lead.leadsConverted != true)
-                IconButton(
-                  icon: const Icon(Icons.autorenew_rounded),
-                  tooltip: 'Convert $_pageTitle to Deal',
-                  color: Theme.of(context).colorScheme.secondary,
-                  splashRadius: 20,
-                  onPressed: () async {
-                    final result = await showDialog<bool>(
-                      context: context,
-                      builder: (_) => const ConfirmDialog(
-                        title: 'Convert $_pageTitle',
-                        content:
-                            'Are you sure you want to convert this lead to a deal?',
-                      ),
-                    );
-
-                    if (result == true) {
-                      await _convertLeadToDeal(context, lead);
-                    }
-                  },
-                ),
-            ],
-          ),
-        ),
-      ],
-    );
   }
 
   /// Manually converts a lead: creates the deal in the "New" stage and links
