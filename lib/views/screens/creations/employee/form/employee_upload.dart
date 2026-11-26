@@ -1,14 +1,37 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:iconsax/iconsax.dart';
 import 'package:intl/intl.dart';
+import '/utils/src/download_io.dart'
+    if (dart.library.html) '/utils/src/download_web.dart'
+    show saveFileToDownloads;
 import '/models/models.dart';
 import '/services/services.dart';
 import '/theme/theme.dart';
 import '/utils/utils.dart';
 import '/views/views.dart';
+
+/// One row of the uploaded sheet that could not be imported, together with
+/// the human-readable reason (shown in the summary table + downloadable report).
+class _SkippedRow {
+  final int rowNum; // row number as seen in the spreadsheet (header = row 1)
+  final String employeeId;
+  final String name;
+  final String email;
+  final String reason;
+
+  const _SkippedRow({
+    required this.rowNum,
+    required this.employeeId,
+    required this.name,
+    required this.email,
+    required this.reason,
+  });
+}
 
 class EmployeeUploadPage extends StatefulWidget {
   const EmployeeUploadPage({super.key});
@@ -23,6 +46,15 @@ class _EmployeeUploadPageState extends State<EmployeeUploadPage> {
   List<List<String>> _rows = [];
   bool _loading = false;
   final ScrollController _scrollController = ScrollController();
+
+  // ── Import result (shown after "Complete Import" when rows were skipped) ──
+  bool _importing = false;
+  bool _showResult = false;
+  int _resultTotal = 0;
+  int _resultAdded = 0;
+  List<_SkippedRow> _skippedRows = [];
+
+  static const int _columnCount = 19;
 
   static const List<Color> _brandGradient = [
     Color(0xFF0052D4),
@@ -85,6 +117,10 @@ class _EmployeeUploadPageState extends State<EmployeeUploadPage> {
       _fileName = null;
       _fileSize = 0;
       _rows = [];
+      _showResult = false;
+      _resultTotal = 0;
+      _resultAdded = 0;
+      _skippedRows = [];
     });
   }
 
@@ -318,6 +354,8 @@ class _EmployeeUploadPageState extends State<EmployeeUploadPage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
+                            if (_showResult) _buildImportSummary(),
+                            if (!_showResult)
                             _buildSectionCard(
                               icon: Iconsax.document_upload,
                               accentColor: Theme.of(context).colorScheme.primary,
@@ -333,7 +371,7 @@ class _EmployeeUploadPageState extends State<EmployeeUploadPage> {
                             ),
                   
                             // Preview Section (Only visible if data exists)
-                            if (_rows.isNotEmpty) ...[
+                            if (!_showResult && _rows.isNotEmpty) ...[
                               const SizedBox(height: 20),
                               _buildSectionCard(
                                 icon: Iconsax.task_square,
@@ -618,38 +656,131 @@ class _EmployeeUploadPageState extends State<EmployeeUploadPage> {
     );
   }
 
-  void _uploadEmployeeData() async {
-    try {
-      if (_rows.isEmpty) return;
+  // ───────────────────────── import helpers ─────────────────────────
 
-      if (_rows.first.length < 19) {
+  /// Accepts dd-MM-yyyy (template format), dd/MM/yyyy, dd.MM.yyyy,
+  /// yyyy-MM-dd, yyyy/MM/dd and Excel serial numbers. Returns null when the
+  /// value cannot be understood.
+  DateTime? _parseDate(String value) {
+    var v = value.trim();
+    if (v.isEmpty) return null;
+
+    // Drop a trailing time part, e.g. "01-01-2024 00:00:00".
+    v = v.split(' ').first;
+
+    final serial = double.tryParse(v);
+    if (serial != null && serial > 1000) {
+      return DateTime(1899, 12, 30).add(Duration(days: serial.floor()));
+    }
+
+    for (final pattern in const [
+      'dd-MM-yyyy',
+      'dd/MM/yyyy',
+      'dd.MM.yyyy',
+      'yyyy-MM-dd',
+      'yyyy/MM/dd',
+    ]) {
+      try {
+        return DateFormat(pattern).parseStrict(v);
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  /// Escapes a value for CSV.
+  String _csv(Object? v) {
+    final t = (v ?? '').toString().replaceAll('"', '""');
+    return '"$t"';
+  }
+
+  Future<void> _downloadSkippedReport() async {
+    try {
+      final b = StringBuffer('\uFEFF'); // BOM so Excel reads UTF-8 correctly
+      b.writeln(
+        ['Row #', 'Employee ID', 'Name', 'Email', 'Reason for Skipping']
+            .map(_csv)
+            .join(','),
+      );
+      for (final r in _skippedRows) {
+        b.writeln(
+          [r.rowNum, r.employeeId, r.name, r.email, r.reason]
+              .map(_csv)
+              .join(','),
+        );
+      }
+      final stamp = DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
+      final path = await saveFileToDownloads(
+        Uint8List.fromList(utf8.encode(b.toString())),
+        fileName: 'Employee_Import_Skipped_$stamp.csv',
+      );
+      if (!mounted) return;
+      FlushBar.show(context, 'Skipped report downloaded');
+      if (!kIsWeb) openfile(path, context);
+    } catch (e, st) {
+      debugPrint('Skipped report download failed: $e, $st');
+      if (mounted) {
         FlushBar.show(
           context,
-          "Error: The uploaded file does not have the required columns.",
+          'Could not download report: $e',
           isSuccess: false,
         );
-        return;
       }
+    }
+  }
 
-      futureLoading(context);
+  // ───────────────────────── import ─────────────────────────
 
+  Future<void> _uploadEmployeeData() async {
+    if (_rows.isEmpty || _importing) return;
+
+    if (_rows.first.length < _columnCount) {
+      FlushBar.show(
+        context,
+        "Error: The uploaded file does not have the required columns.",
+        isSuccess: false,
+      );
+      return;
+    }
+
+    _importing = true;
+    final navigator = Navigator.of(context, rootNavigator: true);
+    var loadingShown = true;
+    void closeLoading() {
+      if (loadingShown) {
+        loadingShown = false;
+        if (navigator.mounted && navigator.canPop()) navigator.pop();
+      }
+    }
+
+    futureLoading(context);
+
+    try {
       int uploadedCount = 0;
-      int skippedCount = 0;
+      final skipped = <_SkippedRow>[];
 
       // assuming row 0 is header
       final totalRows = _rows.length - 1;
 
-      // Tracks why a row was skipped, e.g. "Duplicate employee" -> 3 rows,
-      // so the closing toast can show a reason breakdown like the leads
-      // import does, instead of a bare added/skipped count.
-      final Map<String, int> skipReasons = {};
-      void recordSkip(String reason) {
-        skippedCount++;
-        skipReasons[reason] = (skipReasons[reason] ?? 0) + 1;
+      void skip({
+        required int rowNum,
+        required String employeeId,
+        required String name,
+        required String email,
+        required String reason,
+      }) {
+        skipped.add(
+          _SkippedRow(
+            rowNum: rowNum,
+            employeeId: employeeId.isEmpty ? '-' : employeeId,
+            name: name.isEmpty ? '-' : name,
+            email: email.isEmpty ? '-' : email,
+            reason: reason,
+          ),
+        );
       }
 
       // Load every existing employee once so duplicates can be checked
-      // in-memory against the whole file, instead of hitting Firestore
+      // in-memory against the whole file, instead of hitting the server
       // three times per row the way the single-employee form does.
       final existingEmployees =
           await EmployeeService.getAllEmployeesForDuplicateCheck();
@@ -662,8 +793,7 @@ class _EmployeeUploadPageState extends State<EmployeeUploadPage> {
       // WHOLE app, not just this company - so also pull in every
       // employee and admin from every other company and merge their
       // email/mobile keys. employeeId numbering is per-company, so it's
-      // deliberately left out of these global keys (see
-      // duplicateContactKeysForEmployee/duplicateContactKeysForAdmin).
+      // deliberately left out of these global keys.
       final globalEmployees =
           await EmployeeService.getAllEmployeesGlobalForDuplicateCheck();
       final globalAdmins =
@@ -675,53 +805,189 @@ class _EmployeeUploadPageState extends State<EmployeeUploadPage> {
           ...EmployeeService.duplicateContactKeysForAdmin(admin),
       ]);
 
+      // key -> spreadsheet row that already imported it (duplicates INSIDE
+      // the uploaded file).
+      final fileKeys = <String, int>{};
+
+      String? keyOf({String? employeeId, String? email, String? mobile}) {
+        final k = EmployeeService.duplicateKeysFor(
+          employeeId: employeeId,
+          email: email,
+          mobileNumber: mobile,
+        );
+        return k.isEmpty ? null : k.first;
+      }
+
       for (var i = 1; i < _rows.length; i++) {
-        final row = _rows[i];
+        // Spreadsheet row number (header is row 1) so the user can find it.
+        final rowNum = i + 1;
+        final raw = _rows[i];
+
+        // Pad short rows so a missing trailing cell never throws RangeError.
+        final row = List<String>.generate(
+          _columnCount,
+          (c) => c < raw.length ? raw[c].toString().trim() : '',
+        );
+
+        final empId = row[0];
+        final name = row[1];
+        final email = row[2];
+        final password = row[3];
+        final mobile = row[7];
 
         try {
-          final hasRequiredFields =
-              row[0].trim().isNotEmpty && // employeeId
-              row[1].trim().isNotEmpty && // name
-              row[3].trim().isNotEmpty && // password
-              row[4].trim().isNotEmpty && // designation
-              row[5].trim().isNotEmpty && // department
-              row[11].trim().isNotEmpty; // role
-
-          if (!hasRequiredFields) {
-            recordSkip('Missing required fields');
+          // Completely blank line in the sheet - nothing to import or report.
+          if (row.every((c) => c.isEmpty)) {
             continue;
           }
 
-          final passwordError = Validation.passwordValidation(
-            input: row[3].trim(),
-            isReq: true,
-          );
-          if (passwordError != null) {
-            recordSkip('Invalid password: $passwordError');
-            continue;
-          }
-
-          final rowKeys = EmployeeService.duplicateKeysFor(
-            employeeId: row[0],
-            email: row[2],
-            mobileNumber: row[7],
-          );
-          final isDuplicate = rowKeys.any(existingKeys.contains);
-          if (isDuplicate) {
-            recordSkip('Duplicate employee (already exists)');
-            continue;
-          }
-
-          final designation =
-              await DesignationService.getDesignationByNameOrCreateDesignation(
-                name: row[4].trim(),
-              );
-
+          // 1. Required fields (list exactly which ones are missing)
           final departmentNames = row[5]
               .split(',')
               .map((d) => d.trim())
               .where((d) => d.isNotEmpty)
               .toList();
+
+          final missing = <String>[
+            if (empId.isEmpty) 'Employee ID',
+            if (name.isEmpty) 'Full Name',
+            if (email.isEmpty) 'Email',
+            if (password.isEmpty) 'Password',
+            if (row[4].isEmpty) 'Designation',
+            if (departmentNames.isEmpty) 'Department',
+            if (row[9].isEmpty) 'Date of Joining',
+            if (row[11].isEmpty) 'Role',
+          ];
+          if (missing.isNotEmpty) {
+            skip(
+              rowNum: rowNum,
+              employeeId: empId,
+              name: name,
+              email: email,
+              reason: 'Missing required field(s): ${missing.join(', ')}',
+            );
+            continue;
+          }
+
+          // 2. Email format
+          final emailError = Validation.validEmail(input: email, isReq: true);
+          if (emailError != null) {
+            skip(
+              rowNum: rowNum,
+              employeeId: empId,
+              name: name,
+              email: email,
+              reason: 'Invalid email format ($email)',
+            );
+            continue;
+          }
+
+          // 3. Password rules
+          final passwordError = Validation.passwordValidation(
+            input: password,
+            isReq: true,
+          );
+          if (passwordError != null) {
+            skip(
+              rowNum: rowNum,
+              employeeId: empId,
+              name: name,
+              email: email,
+              reason: 'Invalid password: $passwordError',
+            );
+            continue;
+          }
+
+          // 4. Dates
+          final doj = _parseDate(row[9]);
+          if (doj == null) {
+            skip(
+              rowNum: rowNum,
+              employeeId: empId,
+              name: name,
+              email: email,
+              reason:
+                  "Invalid Date of Joining '${row[9]}' (expected dd-MM-yyyy)",
+            );
+            continue;
+          }
+
+          DateTime? dob;
+          if (row[10].isNotEmpty) {
+            dob = _parseDate(row[10]);
+            if (dob == null) {
+              skip(
+                rowNum: rowNum,
+                employeeId: empId,
+                name: name,
+                email: email,
+                reason:
+                    "Invalid Date of Birth '${row[10]}' (expected dd-MM-yyyy)",
+              );
+              continue;
+            }
+          }
+
+          // 5. Already exists in the organization (database)
+          final idKey = keyOf(employeeId: empId);
+          final emailKey = keyOf(email: email);
+          final mobileKey = keyOf(mobile: mobile);
+
+          final existsIn = <String>[
+            if (idKey != null && existingKeys.contains(idKey))
+              "Employee ID '$empId'",
+            if (emailKey != null && existingKeys.contains(emailKey))
+              "Email '$email'",
+            if (mobileKey != null && existingKeys.contains(mobileKey))
+              "Mobile Number '$mobile'",
+          ];
+          if (existsIn.isNotEmpty) {
+            skip(
+              rowNum: rowNum,
+              employeeId: empId,
+              name: name,
+              email: email,
+              reason: existsIn.length == 1
+                  ? '${existsIn.first} already exists in your organization'
+                  : '${existsIn.join(', ')} already exist in your organization',
+            );
+            continue;
+          }
+
+          // 6. Duplicate inside the uploaded file itself
+          final dupInFile = <String>[];
+          if (idKey != null && fileKeys.containsKey(idKey)) {
+            dupInFile.add(
+              "Employee ID '$empId' (already used in row #${fileKeys[idKey]})",
+            );
+          }
+          if (emailKey != null && fileKeys.containsKey(emailKey)) {
+            dupInFile.add(
+              "Email '$email' (already used in row #${fileKeys[emailKey]})",
+            );
+          }
+          if (mobileKey != null && fileKeys.containsKey(mobileKey)) {
+            dupInFile.add(
+              "Mobile Number '$mobile' (already used in row #${fileKeys[mobileKey]})",
+            );
+          }
+          if (dupInFile.isNotEmpty) {
+            skip(
+              rowNum: rowNum,
+              employeeId: empId,
+              name: name,
+              email: email,
+              reason:
+                  'Duplicate in uploaded spreadsheet: ${dupInFile.join(', ')}',
+            );
+            continue;
+          }
+
+          // ── Resolve lookups (auto-creates missing masters) ──
+          final designation =
+              await DesignationService.getDesignationByNameOrCreateDesignation(
+                name: row[4],
+              );
 
           final department = await Future.wait(
             departmentNames.map(
@@ -732,20 +998,20 @@ class _EmployeeUploadPageState extends State<EmployeeUploadPage> {
           );
 
           String? subDepartment;
-          if (row[6].trim().isNotEmpty) {
+          if (row[6].isNotEmpty) {
             subDepartment =
                 await SubDepartmentService.getSubDepartmentByNameOrCreateSubDepartment(
-                  name: row[6].trim(),
+                  name: row[6],
                   department: department.first,
                 );
           }
 
-          final genderValue = row[8].trim().toLowerCase();
+          final genderValue = row[8].toLowerCase();
           var gender = 'Male';
           if (genderValue == 'female') gender = 'Female';
 
           final role = await RoleService.getRoleByNameOrCreateRole(
-            name: row[11].trim(),
+            name: row[11],
           );
 
           final reportingToVal = row[12]
@@ -754,17 +1020,17 @@ class _EmployeeUploadPageState extends State<EmployeeUploadPage> {
               .where((e) => e.isNotEmpty)
               .toList();
 
-          List<String> reportingTo = [];
-          for (var i in reportingToVal) {
-            if (i.isNotEmpty) {
-              var uid = await EmployeeService.getEmployeeById(employeeId: i);
-              if (uid != null) {
-                reportingTo.add(uid);
-              }
+          final reportingTo = <String>[];
+          for (final reportId in reportingToVal) {
+            final uid = await EmployeeService.getEmployeeById(
+              employeeId: reportId,
+            );
+            if (uid != null) {
+              reportingTo.add(uid);
             }
           }
 
-          final maritalStatusValue = row[17].trim().toLowerCase();
+          final maritalStatusValue = row[17].toLowerCase();
           var maritalStatus = 'Single';
           if (maritalStatusValue == 'married') {
             maritalStatus = 'Married';
@@ -774,7 +1040,7 @@ class _EmployeeUploadPageState extends State<EmployeeUploadPage> {
             maritalStatus = 'Widowed';
           }
 
-          final employeeTypeValue = row[18].trim().toLowerCase();
+          final employeeTypeValue = row[18].toLowerCase();
           var employeeType = 'Full Time';
           if (employeeTypeValue == 'part time') {
             employeeType = 'Part Time';
@@ -787,23 +1053,23 @@ class _EmployeeUploadPageState extends State<EmployeeUploadPage> {
           }
 
           final employeeModel = EmployeeModel(
-            employeeId: row[0].trim(),
-            name: row[1].trim(),
-            email: row[2].trim(),
-            password: row[3].trim(),
+            employeeId: empId,
+            name: name,
+            email: email,
+            password: password,
             designation: designation,
             department: department,
-            mobileNumber: row[7].trim(),
+            mobileNumber: mobile,
             gender: gender,
             subDepartment: subDepartment,
-            dateOfJoining: DateFormat("dd-MM-yyyy").parse(row[9].trim()),
-            dateOfBirth: DateFormat("dd-MM-yyyy").parse(row[10].trim()),
+            dateOfJoining: doj,
+            dateOfBirth: dob,
             role: role,
             reportingTo: reportingTo,
-            address: row[13].trim(),
-            about: row[14].trim(),
-            loginAllowed: row[15].trim().toLowerCase() == 'yes',
-            receiveEmailNotifications: row[16].trim().toLowerCase() == 'yes',
+            address: row[13],
+            about: row[14],
+            loginAllowed: row[15].toLowerCase() == 'yes',
+            receiveEmailNotifications: row[16].toLowerCase() == 'yes',
             maritalStatus: maritalStatus,
             skills: '',
             employeeType: employeeType,
@@ -812,56 +1078,300 @@ class _EmployeeUploadPageState extends State<EmployeeUploadPage> {
 
           await EmployeeService.createEmployee(employee: employeeModel);
           uploadedCount++;
-          // Register this new employee's keys so a duplicate later in the
-          // same file is also caught, not just duplicates against what
-          // already existed before the upload started.
-          existingKeys.addAll(rowKeys);
+
+          // Remember this row's keys so a later duplicate inside the same
+          // file is reported with the row number that came first.
+          for (final k in [idKey, emailKey, mobileKey]) {
+            if (k != null) fileKeys[k] = rowNum;
+          }
         } catch (e, st) {
-          // Show the real error so future failures are self-diagnosing
-          // from the toast itself, instead of a generic "skipped".
-          final reason =
-              'Upload error: ${e.toString().replaceFirst('Exception: ', '')}';
-          recordSkip(reason);
-          debugPrint('Error uploading row ${i + 1}: $e, $st');
+          // Show the real server / validation message as the reason, so
+          // every skipped row is explained.
+          var reason = e.toString().replaceFirst('Exception: ', '').trim();
+          if (reason.isEmpty) reason = 'Unexpected error while saving';
+          skip(
+            rowNum: rowNum,
+            employeeId: empId,
+            name: name,
+            email: email,
+            reason: reason,
+          );
+          debugPrint('Error uploading row $rowNum: $e, $st');
         }
       }
 
-      if (Navigator.canPop(context)) {
-        Navigator.pop(context);
-      }
-      Navigator.pop(context, true);
+      closeLoading();
+      if (!mounted) return;
 
-      final buffer = StringBuffer()
-        ..writeln("Upload Completed")
-        ..writeln(
-          "Total: $totalRows  •  Added: $uploadedCount  •  Skipped: $skippedCount",
+      if (skipped.isEmpty) {
+        // Everything imported - same behaviour as before.
+        Navigator.pop(context, true);
+        FlushBar.show(
+          context,
+          "Upload Completed\nTotal: $totalRows  •  Added: $uploadedCount  •  Skipped: 0",
+          isSuccess: uploadedCount > 0,
+          duration: const Duration(seconds: 5),
         );
-
-      if (skipReasons.isNotEmpty) {
-        final reasonLines = skipReasons.entries
-            .map((e) => "${e.key}: ${e.value}")
-            .join('\n');
-        buffer.write(reasonLines);
+        return;
       }
 
+      // Some / all rows skipped: stay on the page and show WHY.
+      setState(() {
+        _resultTotal = totalRows;
+        _resultAdded = uploadedCount;
+        _skippedRows = skipped;
+        _showResult = true;
+      });
       FlushBar.show(
         context,
-        buffer.toString().trimRight(),
+        uploadedCount > 0
+            ? 'Imported $uploadedCount employee(s). ${skipped.length} skipped.'
+            : 'No employees were imported. ${skipped.length} skipped.',
         isSuccess: uploadedCount > 0,
-        duration: skipReasons.isEmpty
-            ? const Duration(seconds: 5)
-            : Duration(seconds: 5 + skipReasons.length),
       );
     } catch (e) {
-      if (Navigator.canPop(context)) {
-        Navigator.pop(context);
+      closeLoading();
+      if (mounted) {
+        FlushBar.show(
+          context,
+          "Error uploading data: ${e.toString()}",
+          isSuccess: false,
+        );
       }
-      FlushBar.show(
-        context,
-        "Error uploading data: ${e.toString()}",
-        isSuccess: false,
-      );
+    } finally {
+      _importing = false;
     }
+  }
+
+  // ───────────────────────── import summary UI ─────────────────────────
+
+  Widget _countChip(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  Widget _reasonPill(String reason) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: AppColors.danger.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.danger.withValues(alpha: 0.35)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(top: 2),
+              child: Icon(Iconsax.info_circle, size: 14, color: AppColors.danger),
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                reason,
+                softWrap: true,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppColors.danger,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSkippedTable() {
+    final scheme = Theme.of(context).colorScheme;
+    final textStyle = Theme.of(context).textTheme.bodySmall;
+    final headStyle = textStyle?.copyWith(
+      fontWeight: FontWeight.bold,
+      color: scheme.onSurfaceVariant,
+      letterSpacing: 0.5,
+    );
+
+    // Below this width the columns would get too cramped, so the table keeps
+    // this width and scrolls sideways instead.
+    const double minTableWidth = 760;
+
+    Widget cell(int flex, Widget child, {double? width}) {
+      final padded = Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Align(alignment: Alignment.centerLeft, child: child),
+      );
+      return width != null
+          ? SizedBox(width: width, child: padded)
+          : Expanded(flex: flex, child: padded);
+    }
+
+    Widget headerRow() => Container(
+      color: Theme.of(context).scaffoldBackgroundColor,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      child: Row(
+        children: [
+          cell(0, Text('ROW #', style: headStyle), width: 72),
+          cell(2, Text('EMP ID', style: headStyle)),
+          cell(3, Text('NAME', style: headStyle)),
+          cell(4, Text('EMAIL', style: headStyle)),
+          cell(6, Text('REASON FOR SKIPPING', style: headStyle)),
+        ],
+      ),
+    );
+
+    Widget dataRow(_SkippedRow r) => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: scheme.outlineVariant)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          cell(0, Text('${r.rowNum}', style: textStyle), width: 72),
+          cell(
+            2,
+            Text(
+              r.employeeId,
+              style: textStyle?.copyWith(
+                color: scheme.primary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          cell(3, Text(r.name, style: textStyle)),
+          cell(4, Text(r.email, style: textStyle)),
+          cell(6, _reasonPill(r.reason)),
+        ],
+      ),
+    );
+
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final tableWidth = constraints.maxWidth < minTableWidth
+                ? minTableWidth
+                : constraints.maxWidth;
+            final table = SizedBox(
+              width: tableWidth,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  headerRow(),
+                  for (final r in _skippedRows) dataRow(r),
+                ],
+              ),
+            );
+            if (constraints.maxWidth >= minTableWidth) return table;
+            return SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: table,
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImportSummary() {
+    final skippedCount = _skippedRows.length;
+    final message = _resultAdded == 0
+        ? 'None of the rows could be imported. All $_resultTotal row(s) were '
+              'skipped due to the specific issues detailed below.'
+        : '$_resultAdded of $_resultTotal row(s) were imported. '
+              '$skippedCount row(s) were skipped due to the specific issues '
+              'detailed below.';
+
+    return _buildSectionCard(
+      icon: Iconsax.document_text,
+      accentColor: _resultAdded == 0 ? AppColors.danger : AppColors.warning,
+      title: 'Import Summary',
+      subtitle: _fileName ?? 'Uploaded file',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _countChip('$_resultAdded Imported', AppColors.success),
+              _countChip('$skippedCount Skipped', AppColors.danger),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            message,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              const Icon(
+                Iconsax.warning_2,
+                size: 18,
+                color: AppColors.warning,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Skipped Records & Reasons',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: _downloadSkippedReport,
+                icon: const Icon(Iconsax.document_download, size: 16),
+                label: const Text('Download Skipped Report'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _buildSkippedTable(),
+          const SizedBox(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _resetFile,
+                icon: const Icon(Iconsax.refresh, size: 16),
+                label: const Text('Upload Another File'),
+              ),
+              const SizedBox(width: 12),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, _resultAdded > 0),
+                child: const Text('Done'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildActionButtons() {
