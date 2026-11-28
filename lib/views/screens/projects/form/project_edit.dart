@@ -120,11 +120,17 @@ class _ProjectEditState extends State<ProjectEdit> {
 
       _selectedProjectMembers = List<String>.from(_projectModel.members);
       _selectedProjectMemberModels.clear();
-      for (var i in _selectedProjectMembers) {
-        var employee = await EmployeeService.getEmployee(uid: i);
-        if (employee != null) {
-          _selectedProjectMemberModels.add(employee);
+      // Resolve members from the already-loaded active-user list. (Using
+      // EmployeeService.getEmployee() dropped members who are admins, since
+      // it returns null for admin rows -> they never showed as selected.)
+      for (final i in _selectedProjectMembers) {
+        final match = _employeesList.where((e) => e.uid == i).firstOrNull;
+        if (match != null) {
+          _selectedProjectMemberModels.add(match);
+          continue;
         }
+        final employee = await EmployeeService.getEmployee(uid: i);
+        if (employee != null) _selectedProjectMemberModels.add(employee);
       }
 
       setState(() {});
@@ -683,21 +689,29 @@ class _ProjectEditState extends State<ProjectEdit> {
               ),
               const SizedBox(height: 8),
               CustomSearchableDropdown(
+                key: ValueKey(
+                  'members_${_employeesList.length}_${_selectedProjectMemberModels.length}',
+                ),
                 initialValues: _selectedProjectMemberModels
                     .map((e) => e.name)
                     .toList(),
                 items: _employeesList.map((e) => e.name).toList(),
                 multiSelect: true,
                 onChangedList: (list) {
-                  for (var i in list) {
-                    final emp = _employeesList.firstWhere(
-                      (element) => element.name == i,
-                    );
-                    if (emp.uid != null &&
-                        !_selectedProjectMembers.contains(emp.uid)) {
-                      _selectedProjectMembers.add(emp.uid!);
-                    }
+                  // Replace (not just add) so un-selecting a member works too.
+                  final models = <EmployeeModel>[];
+                  for (final name in list) {
+                    final emp = _employeesList
+                        .where((element) => element.name == name)
+                        .firstOrNull;
+                    if (emp != null && emp.uid != null) models.add(emp);
                   }
+                  _selectedProjectMemberModels
+                    ..clear()
+                    ..addAll(models);
+                  _selectedProjectMembers = models
+                      .map((e) => e.uid!)
+                      .toList();
                 },
                 itemAsString: (s) => s,
               ),

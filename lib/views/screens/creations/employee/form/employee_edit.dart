@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
@@ -73,11 +74,6 @@ class _EmployeeEditState extends State<EmployeeEdit> {
   AdminModel? _originalAdmin;
   bool _isActive = true;
 
-  // True when this screen was opened for an existing ADMIN record.
-  bool get _wasAdmin => widget.admin != null;
-  // Admin rows created via the admin form have no stored joining date.
-  bool _hadStoredJoiningDate = true;
-
   // State preservation for current form values when toggling Make as Admin
   String? _preservedEmployeeId;
   String? _preservedDesignation;
@@ -115,21 +111,9 @@ class _EmployeeEditState extends State<EmployeeEdit> {
         _passwordController.text = widget.admin!.password;
         _originalPassword = widget.admin!.password;
         _mobileNumberController.text = widget.admin!.mobileNumber;
+        _selectedDateOfBirth = widget.admin!.createdAt;
         _profileImageUrl = widget.admin!.profileImageUrl;
         isAdmin = true;
-
-        // The server keeps ONE user record, so an admin row still carries
-        // designation / department / gender / dates. Load them so un-ticking
-        // "Make as Admin" restores them instead of showing blank fields.
-        await ApiLookup.ensure();
-        final storedRow = await EmployeeService.getUserRow(widget.uid);
-        if (storedRow != null) {
-          final stored = ApiMappers.employee(storedRow);
-          _originalEmployee = stored;
-          _selectedDateOfBirth = stored.dateOfBirth;
-          _dateOfBirthController.text = stored.dateOfBirth?.formatDate ?? '';
-          _hadStoredJoiningDate = Js.dt(storedRow['date_of_joining']) != null;
-        }
 
         // Pull the fields that live directly on the admin record now.
         _addressController.text = widget.admin!.address ?? '';
@@ -253,9 +237,29 @@ class _EmployeeEditState extends State<EmployeeEdit> {
       _subDepartmentModel = null;
       _roleModel = null;
     } else {
-      // Switching to employee mode - restore preserved values, falling back
-      // to what is stored on the server record.
-      final orig = _originalEmployee;
+      // Switching to employee mode - restore preserved values
+      _employeeIdController.text =
+          _preservedEmployeeId ?? _originalEmployee?.employeeId ?? '';
+      _dateOfJoiningController.text =
+          _preservedDateOfJoining ??
+          _originalEmployee?.dateOfJoining.formatDate ??
+          '';
+      _gender = _preservedGender ?? _originalEmployee?.gender;
+
+      _department.clear();
+      if (_preservedDepartment.isNotEmpty) {
+        _department.addAll(_preservedDepartment);
+      } else if (_originalEmployee?.department != null &&
+          _originalEmployee!.department!.isNotEmpty) {
+        _department.addAll(_originalEmployee!.department!);
+      }
+
+      _reportingTo.clear();
+      if (_preservedReportingTo.isNotEmpty) {
+        _reportingTo.addAll(_preservedReportingTo);
+      } else if (_originalEmployee?.reportingTo != null) {
+        _reportingTo.addAll(_originalEmployee!.reportingTo!);
+      }
 
       // Ensure dropdown lists are loaded
       if (_rolesList.isEmpty) {
@@ -268,92 +272,70 @@ class _EmployeeEditState extends State<EmployeeEdit> {
         _departmentList = await DepartmentService.getAllDepartments();
       }
 
-      // Employee id (admin rows carry a generated ADMINxx code -> new EMP id)
-      var restoredId = (_preservedEmployeeId ?? '').trim();
-      if (restoredId.isEmpty) restoredId = orig?.employeeId ?? '';
-      if (_wasAdmin &&
-          (restoredId.isEmpty || restoredId.toUpperCase().startsWith('ADMIN'))) {
-        restoredId = await EmployeeService.generateEmployeeId();
-      }
-      _employeeIdController.text = restoredId;
-
-      // Joining date
-      final preservedJoin = (_preservedDateOfJoining ?? '').trim();
-      if (preservedJoin.isNotEmpty) {
-        _dateOfJoiningController.text = preservedJoin;
-      } else if (orig != null && (!_wasAdmin || _hadStoredJoiningDate)) {
-        _dateOfJoiningController.text = orig.dateOfJoining.formatDate;
-        _selectedDateOfJoining = orig.dateOfJoining;
-      }
-
-      // Birth date
-      if (_dateOfBirthController.text.isEmpty && orig?.dateOfBirth != null) {
-        _dateOfBirthController.text = orig!.dateOfBirth!.formatDate;
-        _selectedDateOfBirth = orig.dateOfBirth;
-      }
-
-      // Gender
-      final preservedGender = _preservedGender ?? '';
-      _gender = preservedGender.isNotEmpty
-          ? preservedGender
-          : ((orig?.gender ?? '').isNotEmpty ? orig!.gender : null);
-
-      // Department
-      _department.clear();
-      if (_preservedDepartment.isNotEmpty) {
-        _department.addAll(_preservedDepartment);
-      } else if (orig?.department != null && orig!.department!.isNotEmpty) {
-        _department.addAll(orig.department!);
-      }
-
-      // Designation
-      final desigUid = _preservedDesignation ?? orig?.designation ?? '';
-      _designationModel = null;
-      if (desigUid.isNotEmpty) {
-        for (final d in _designationList) {
-          if (d.uid == desigUid) _designationModel = d;
-        }
-      }
-
-      // Sub department (list depends on the restored departments)
-      _subDepartmentList.clear();
-      for (var depId in _department) {
-        _subDepartmentList.addAll(
-          await SubDepartmentService.getSubDepartmentsByDepId(depId: depId),
+      // Restore dropdown models
+      if (_preservedDesignation != null) {
+        _designationModel = _designationList.firstWhere(
+          (d) => d.uid == _preservedDesignation,
+          orElse: () => _designationList.first,
+        );
+      } else if (_originalEmployee?.designation != null) {
+        _designationModel = await DesignationService.getDesignation(
+          uid: _originalEmployee!.designation,
         );
       }
-      final subUid = _preservedSubDepartment ?? orig?.subDepartment ?? '';
-      _subDepartmentModel = null;
-      if (subUid.isNotEmpty) {
-        for (final sd in _subDepartmentList) {
-          if (sd.uid == subUid) _subDepartmentModel = sd;
+
+      if (_preservedSubDepartment != null) {
+        _subDepartmentList.clear();
+        for (var depId in _department) {
+          final subDeps = await SubDepartmentService.getSubDepartmentsByDepId(
+            depId: depId,
+          );
+          _subDepartmentList.addAll(subDeps);
         }
+        try {
+          _subDepartmentModel = _subDepartmentList.firstWhere(
+            (sd) => sd.uid == _preservedSubDepartment,
+          );
+        } catch (e) {
+          _subDepartmentModel = _subDepartmentList.isNotEmpty
+              ? _subDepartmentList.first
+              : null;
+        }
+      } else if (_originalEmployee?.subDepartment != null) {
+        _subDepartmentList.clear();
+        for (var depId in _department) {
+          final subDeps = await SubDepartmentService.getSubDepartmentsByDepId(
+            depId: depId,
+          );
+          _subDepartmentList.addAll(subDeps);
+        }
+        _subDepartmentModel = await SubDepartmentService.getSubDepartment(
+          uid: _originalEmployee!.subDepartment ?? '',
+        );
       }
 
-      // Role: an admin record holds the Admin role, which must not be
-      // pre-selected for an employee - the user picks one.
-      final roleUid = _preservedRole ?? (_wasAdmin ? '' : (orig?.role ?? ''));
-      _roleModel = null;
-      if (roleUid.isNotEmpty) {
-        for (final r in _rolesList) {
-          if (r.uid == roleUid) _roleModel = r;
-        }
+      if (_preservedRole != null) {
+        _roleModel = _rolesList.firstWhere(
+          (r) => r.uid == _preservedRole,
+          orElse: () => _rolesList.first,
+        );
+      } else if (_originalEmployee?.role != null) {
+        _roleModel = await RoleService.getRole(uid: _originalEmployee!.role);
       }
 
-      // Reporting to
-      _reportingTo.clear();
-      final restoreRt = _preservedReportingTo.isNotEmpty
-          ? _preservedReportingTo
-          : (orig?.reportingTo ?? <String>[]);
-      _reportingTo.addAll(restoreRt);
-      _initialReportingTo.clear();
-      for (var uid in restoreRt) {
-        var emp = await EmployeeService.getEmployee(uid: uid);
-        if (emp != null) {
-          _initialReportingTo.add(emp);
-        } else {
-          var admin = await AdminService.getAdmin(uid: uid);
-          if (admin != null) _initialReportingTo.add(admin);
+      // Restore reporting to list
+      if (_preservedReportingTo.isNotEmpty) {
+        _initialReportingTo.clear();
+        for (var uid in _preservedReportingTo) {
+          var emp = await EmployeeService.getEmployee(uid: uid);
+          if (emp != null) {
+            _initialReportingTo.add(emp);
+          } else {
+            var admin = await AdminService.getAdmin(uid: uid);
+            if (admin != null) {
+              _initialReportingTo.add(admin);
+            }
+          }
         }
       }
     }
@@ -367,6 +349,7 @@ class _EmployeeEditState extends State<EmployeeEdit> {
   void dispose() {
     _employeeIdController.dispose();
     _nameController.dispose();
+    _emailDebounce?.cancel();
     _emailController.dispose();
     _passwordController.dispose();
     _mobileNumberController.dispose();
@@ -1107,7 +1090,12 @@ _scrollController.dispose();
             hintText: 'Enter Email',
             isRequired: true,
             prefixIcon: const Icon(Iconsax.sms, size: 18),
-            valid: (input) => Validation.validEmail(input: input, isReq: true),
+            suffixIcon: _emailSuffix,
+            onChanged: _onEmailChanged,
+            errorText: _emailTakenError,
+            valid: (input) =>
+                Validation.validEmail(input: input, isReq: true) ??
+                _emailTakenError,
           ),
         ),
         SizedBox(
@@ -1615,15 +1603,95 @@ _scrollController.dispose();
     );
   }
 
+  // ── Realtime e-mail uniqueness (global, via employees.php check_email) ──
+  String? get _originalEmail => _originalAdmin?.email ?? _originalEmployee?.email;
+
+  Timer? _emailDebounce;
+  int _emailCheckSeq = 0;
+  bool _emailChecking = false;
+  String? _emailTakenError;
+  String _emailChecked = '';
+
+  bool get _emailFormatOk =>
+      Validation.validEmail(input: _emailController.text, isReq: true) == null;
+
+  void _onEmailChanged(String value) {
+    _emailDebounce?.cancel();
+    final email = value.trim();
+    if (email.toLowerCase() == _emailChecked) return;
+    if (_emailTakenError != null || _emailChecking) {
+      setState(() {
+        _emailTakenError = null;
+        _emailChecking = false;
+      });
+    }
+    _emailCheckSeq++;
+    if (!_emailFormatOk) return;
+    _emailDebounce = Timer(const Duration(milliseconds: 500), _checkEmailNow);
+  }
+
+  Future<void> _checkEmailNow() async {
+    _emailDebounce?.cancel();
+    final email = _emailController.text.trim();
+    if (!_emailFormatOk) return;
+    // Unchanged e-mail of the record being edited is always fine.
+    final original = (_originalEmail ?? '').trim().toLowerCase();
+    if (email.toLowerCase() == original) {
+      if (mounted) setState(() {
+        _emailTakenError = null;
+        _emailChecking = false;
+      });
+      _emailChecked = email.toLowerCase();
+      return;
+    }
+    final seq = ++_emailCheckSeq;
+    if (mounted) setState(() => _emailChecking = true);
+    final err = await EmployeeService.checkEmailTaken(
+      email: email,
+      excludeUid: widget.uid,
+    );
+    if (!mounted || seq != _emailCheckSeq) return; // a newer keystroke won
+    setState(() {
+      _emailChecking = false;
+      _emailTakenError = err;
+      _emailChecked = err == null ? email.toLowerCase() : '';
+    });
+  }
+
+  Widget? get _emailSuffix {
+    if (_emailChecking) {
+      return const Padding(
+        padding: EdgeInsets.all(10),
+        child: SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      );
+    }
+    if (_emailTakenError == null && _emailChecked.isNotEmpty && _emailFormatOk) {
+      return const Icon(Icons.check_circle, size: 18, color: Colors.green);
+    }
+    return null;
+  }
+
   void _submitForm() async {
+    // Make sure the latest e-mail has been checked against the server.
+    if (_emailFormatOk && _emailChecked != _emailController.text.trim().toLowerCase()) {
+      await _checkEmailNow();
+    }
+    if (_emailTakenError != null || _emailChecking) {
+      _formKey.currentState?.validate();
+      return;
+    }
     if (_formKey.currentState!.validate()) {
       try {
-        // An admin must not remove admin access from their own account
-        // (the logged-in session would keep stale admin rights).
-        if (_wasAdmin && !isAdmin && widget.uid == await Spdb.getUid()) {
+        // employees.php `update` cannot change user_type, so switching an
+        // existing record between Admin and Employee is not possible.
+        if (isAdmin != (widget.admin != null)) {
           FlushBar.show(
             context,
-            'You cannot remove admin access from your own account.',
+            'Changing a user between Admin and Employee is not supported by the server API.',
             isSuccess: false,
           );
           return;
@@ -1684,11 +1752,7 @@ _scrollController.dispose();
             outsideOffice: _outsideOffice == 'Yes',
           );
 
-          await AdminService.updateAdmin(
-            id: widget.uid,
-            data: adminModel,
-            convertFromEmployee: !_wasAdmin,
-          );
+          await AdminService.updateAdmin(id: widget.uid, data: adminModel);
 
           // Own password changed -> end the session, log in again.
           final ownPasswordChanged = await _isOwnPasswordChange();
@@ -1772,8 +1836,6 @@ _scrollController.dispose();
           await EmployeeService.editEmployee(
             uid: widget.uid,
             employee: employeeModel,
-            makeAdmin: false,
-            changedUserType: _wasAdmin,
           );
 
           // Own password changed -> end the session, log in again.

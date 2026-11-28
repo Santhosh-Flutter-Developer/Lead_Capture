@@ -8,7 +8,6 @@ class EmployeeService {
     ErrorService.recordError(e, st);
     debugPrint('$e, $st');
     if (e is ApiException) throw e.message;
-    if (e is String) throw e; // already a user-facing message
     throw '$prefix: $e';
   }
 
@@ -42,32 +41,6 @@ class EmployeeService {
 
   /// Duplicate check against the current company's users (the API only
   /// exposes the caller's company; the server also re-validates on save).
-  /// GLOBAL e-mail uniqueness (all companies, admins + employees) via
-  /// employees.php `check_email`. Returns the message to show when the e-mail
-  /// is taken, or null when it is free.
-  static Future<String?> checkEmailGlobally(String email, {String? excludeUid}) async {
-    final e = email.trim();
-    if (e.isEmpty) return null;
-    final res = await EmployeesApiService.checkEmail(email: e, excludeUid: excludeUid);
-    if (res.status) return null;
-    final d = res.dataMap;
-    if (Js.b(d['exists']) || d['is_unique'] == false) {
-      return res.message.isNotEmpty ? res.message : 'Email already exists';
-    }
-    // Any other failure (validation / permission): surface the server text.
-    return res.message.isNotEmpty ? res.message : 'Unable to verify email';
-  }
-
-  /// Raw users row (employee OR admin) - the server keeps both in one table.
-  static Future<Map<String, dynamic>?> getUserRow(String uid) async {
-    try {
-      if (uid.isEmpty) return null;
-      return await _userRow(uid);
-    } catch (e, st) {
-      _fail('Error getting user', e, st);
-    }
-  }
-
   static Future<String?> checkEmployeeExists({
     required String employeeId,
     required String email,
@@ -83,13 +56,37 @@ class EmployeeService {
           return 'Employee ID already exists';
         }
       }
-      final emailError = await checkEmailGlobally(email, excludeUid: excludeUid);
-      if (emailError != null) return emailError;
       return _contactCheck(rows, email, mobileNumber, excludeUid);
     } catch (e, st) {
       _fail('Error checking employee', e, st);
     }
   }
+
+  /// Realtime e-mail check used by the employee create / edit forms.
+  /// Returns an error message when the e-mail is already used by ANY active
+  /// employee / user (all organizations), `null` when it is free OR when the
+  /// check could not be completed (the server re-validates on save).
+  static Future<String?> checkEmailTaken({
+    required String email,
+    String? excludeUid,
+  }) async {
+    try {
+      final r = await EmployeesApiService.checkEmail(email: email, excludeUid: excludeUid);
+      if (r.status) return null;
+      if (Js.b(r.dataMap['exists']) || r.dataMap['is_unique'] == false) {
+        return 'An employee or user with this Email address already exists in the system.';
+      }
+      return null;
+    } catch (e) {
+      debugPrint('check_email failed: $e');
+      return null;
+    }
+  }
+
+  /// Global (all organizations) e-mail uniqueness check. Returns the error
+  /// message when taken, `null` when free. Used by AdminService.updateAdmin.
+  static Future<String?> checkEmailGlobally(String email, {String? excludeUid}) =>
+      checkEmailTaken(email: email, excludeUid: excludeUid);
 
   static Future<String?> checkContactExists({
     required String email,
@@ -97,8 +94,6 @@ class EmployeeService {
     String? excludeUid,
   }) async {
     try {
-      final emailError = await checkEmailGlobally(email, excludeUid: excludeUid);
-      if (emailError != null) return emailError;
       return _contactCheck(await _userRows(), email, mobileNumber, excludeUid);
     } catch (e, st) {
       _fail('Error checking contact details', e, st);
@@ -165,8 +160,6 @@ class EmployeeService {
 
   static Future<void> createEmployee({required EmployeeModel employee}) async {
     try {
-      final dup = await checkEmailGlobally(employee.email);
-      if (dup != null) throw dup;
       await ApiLookup.ensure();
       (await EmployeesApiService.create(ApiMappers.employeeBody(employee))).ensureSuccess();
       ApiLive.changed({'employee', 'role'});
@@ -175,21 +168,14 @@ class EmployeeService {
     }
   }
 
-  /// [makeAdmin] sends `make_as_admin` (promote). Leave false for employees;
-  /// with false the server demotes an admin row back to an employee.
-  /// [changedUserType] only widens the live-refresh keys.
   static Future<void> editEmployee({
     required String uid,
     required EmployeeModel employee,
-    bool makeAdmin = false,
-    bool changedUserType = false,
   }) async {
     try {
-      final dup = await checkEmailGlobally(employee.email, excludeUid: uid);
-      if (dup != null) throw dup;
       await ApiLookup.ensure();
-      (await EmployeesApiService.update(uid, ApiMappers.employeeBody(employee, makeAdmin: makeAdmin))).ensureSuccess();
-      ApiLive.changed({'employee', 'role', if (changedUserType) 'admin'});
+      (await EmployeesApiService.update(uid, ApiMappers.employeeBody(employee))).ensureSuccess();
+      ApiLive.changed({'employee', 'role'});
     } catch (e, st) {
       _fail('Error updating employee', e, st);
     }

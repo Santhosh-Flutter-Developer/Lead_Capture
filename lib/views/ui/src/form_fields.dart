@@ -36,6 +36,10 @@ class FormFields extends StatefulWidget {
   final bool? isDense;
   final TextStyle? style;
 
+  /// Externally supplied error (e.g. a realtime server check). Shown
+  /// immediately, without waiting for the form to be validated.
+  final String? errorText;
+
   const FormFields({
     super.key,
     this.controller,
@@ -64,6 +68,7 @@ class FormFields extends StatefulWidget {
     this.contentPadding,
     this.isDense,
     this.style,
+    this.errorText,
   });
 
   @override
@@ -98,6 +103,8 @@ class _FormFieldsState extends State<FormFields> {
             ? Text(widget.fLabel!, style: Theme.of(context).textTheme.bodySmall)
             : null,
         hintText: widget.hintText,
+        errorText: widget.errorText,
+        errorMaxLines: 3,
         hintStyle: Theme.of(context).textTheme.bodySmall,
         suffix: widget.suffix,
         suffixIcon: widget.suffixIcon,

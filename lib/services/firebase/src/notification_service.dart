@@ -65,11 +65,64 @@ Future<bool> _isForCurrentUser(Map<String, dynamic> data) async {
   try {
     final uid = (await Spdb.getUidFresh())?.trim();
     if (uid == null || uid.isEmpty) return false; // logged out
+
+    // 1. Recipient / company carried by the payload (socket events do).
+    final rec = (data['recipient_uid'] ?? '').toString().trim();
+    if (rec.isNotEmpty && rec != 'all' && rec != uid) return false;
+    final cid = (data['company_id'] ?? data['companyId'] ?? '').toString().trim();
+    if (cid.isNotEmpty) {
+      final mine = (await Spdb.getCid())?.trim() ?? '';
+      if (mine.isNotEmpty && cid != mine) return false; // other company
+    }
+
     final raw = (data['toUids'] ?? '').toString();
-    if (raw.isEmpty) return true; // older payload without recipients
-    return raw.split(',').map((e) => e.trim()).contains(uid);
+    if (raw.isNotEmpty) {
+      return raw.split(',').map((e) => e.trim()).contains(uid);
+    }
+
+    // 2. FCM pushes carry no recipient: confirm with the server that this
+    //    notification really belongs to the logged-in user (the list is
+    //    scoped to the user's own company + recipient).
+    return await _belongsToSession(data);
   } catch (_) {
     return true; // never lose a notification because of a check failure
+  }
+}
+
+final Set<String> _verifiedNotifIds = {};
+Future<Set<String>>? _sessionNotifIds;
+DateTime _sessionNotifIdsAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+/// `true` when [data]'s notification id is in the logged-in user's own
+/// notification list. Unknown / unverifiable cases return `true`.
+Future<bool> _belongsToSession(Map<String, dynamic> data) async {
+  if ((data['lc_local'] ?? '').toString() == '1') return true; // checked already
+  final type = (data['type'] ?? '').toString();
+  final id = (data['notification_uid'] ?? data['uid'] ?? '').toString();
+  if (id.isEmpty || type == 'test') return true;
+  if (_verifiedNotifIds.contains(id)) return true;
+  try {
+    if (_sessionNotifIds == null ||
+        DateTime.now().difference(_sessionNotifIdsAt).inSeconds > 3) {
+      _sessionNotifIdsAt = DateTime.now();
+      _sessionNotifIds = () async {
+        final res = (await NotificationsApiService.call('list')).ensureSuccess();
+        return Js.mapList(res.dataMap['notifications'])
+            .map((m) => Js.s(m['uid']))
+            .where((e) => e.isNotEmpty)
+            .toSet();
+      }();
+    }
+    final ids = await _sessionNotifIds!;
+    if (ids.contains(id)) {
+      _verifiedNotifIds.add(id);
+      return true;
+    }
+    debugPrint('🔕 [NOTIF] dropped: $id is not in this user\'s notifications');
+    return false;
+  } catch (_) {
+    _sessionNotifIds = null;
+    return true; // cannot verify (offline) -> do not lose it
   }
 }
 
@@ -574,6 +627,18 @@ class NotificationService {
             payload: json.encode({...data, 'isReply': 'true'}),
           );
         }
+        return;
+      }
+
+      // A push with neither a title nor a text is a silent / content-less
+      // signal: showing it produced the empty "Notification - You have a new
+      // message" banner. Nothing to tell the user, so drop it.
+      final String genTitle =
+          (notification?.title ?? data['title'] ?? '').toString().trim();
+      final String genBody =
+          (notification?.body ?? data['body'] ?? '').toString().trim();
+      if (genTitle.isEmpty && genBody.isEmpty) {
+        debugPrint('🔕 [NOTIF] dropped: push has no title/body');
         return;
       }
 

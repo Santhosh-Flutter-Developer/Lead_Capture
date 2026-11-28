@@ -116,6 +116,7 @@ class ChatService {
     _lastChats = [];
     _groupMembers.clear();
     _lastMessages.clear();
+    _socketMsgs.clear();
     _peerNames.clear();
     _peerAvatars.clear();
     _publishUnviewed(<String, int>{});
@@ -168,11 +169,41 @@ class ChatService {
 
   // ── messages ───────────────────────────────────────────────────────────
   /// Newest first (same order the UI always received).
+  // Messages received live over the socket. The API's `messages` action
+  // returns the OLDEST 300 messages of a chat (ORDER BY id ASC LIMIT 300), so
+  // in a busy group the newest ones never come back from it. Messages seen
+  // through the socket are kept here and merged in (by id) so they still show.
+  static final Map<String, Map<int, Map<String, dynamic>>> _socketMsgs = {};
+
+  /// Called by RealtimeService for every `chat_message` socket event.
+  static void addSocketMessage(Map<String, dynamic> m) {
+    final chatUid = Js.s(m['chat_uid']);
+    final id = Js.i(m['id']);
+    if (chatUid.isEmpty || id == null) return;
+    final bucket = _socketMsgs.putIfAbsent(chatUid, () => {});
+    bucket[id] = Map<String, dynamic>.from(m);
+    if (bucket.length > 200) {
+      final keys = bucket.keys.toList()..sort();
+      for (final k in keys.take(bucket.length - 200)) {
+        bucket.remove(k);
+      }
+    }
+  }
+
   static Future<List<MessagesModel>> _fetchMessages(String chatUid) async {
     final res = (await ChatsApiService.messages(chatUid)).ensureSuccess();
     final chat = await getChat(uid: chatUid);
     final receivers = chat?.participants ?? const <String>[];
-    final list = Js.mapList(res.dataMap['messages'])
+    final rows = Js.mapList(res.dataMap['messages']);
+    final extra = _socketMsgs[chatUid];
+    if (extra != null && extra.isNotEmpty) {
+      final have = rows.map((r) => Js.i(r['id'])).whereType<int>().toSet();
+      final ids = extra.keys.where((id) => !have.contains(id)).toList()..sort();
+      for (final id in ids) {
+        rows.add(extra[id]!);
+      }
+    }
+    final list = rows
         .map((m) => ChatMappers.message(m, receivers: receivers))
         .toList()
         .reversed

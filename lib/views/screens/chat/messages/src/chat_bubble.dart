@@ -710,6 +710,47 @@ class _ChatBubbleCore extends StatelessWidget {
     this.onBubbleExit,
   });
 
+  /// Opens (or creates) the one-to-one chat with [opponentUid].
+  Future<void> _openIndividualChat(
+    BuildContext context,
+    String opponentUid,
+  ) async {
+    try {
+      final uid = await Spdb.getUid();
+      if (uid == null || uid.isEmpty || opponentUid.isEmpty) return;
+      // Tapping your own avatar / unknown sender does nothing.
+      if (opponentUid == uid) return;
+
+      String? chatId = await ChatService.getChatUid(opponentUid);
+      chatId ??= await ChatService.createIndividualChat(userId: opponentUid);
+
+      final chat = await ChatService.getChat(uid: chatId);
+      if (chat == null) return;
+      if (!context.mounted) return;
+
+      if (!kIsMobile && onOpenChat != null) {
+        // Desktop: swap the right pane to that person's chat.
+        onOpenChat!(chat, opponentUid);
+        return;
+      }
+
+      Navigate.route(
+        context,
+        ChatMessages(chat: chat, currentUser: uid, opponentUid: opponentUid),
+      );
+    } catch (e, st) {
+      await ErrorService.recordError(e, st);
+      if (!context.mounted) return;
+      FlushBar.show(
+        context,
+        'Failed to open chat',
+        isSuccess: false,
+        error: e,
+        stackTrace: st,
+      );
+    }
+  }
+
   /// Anchors the desktop hover chips to the bubble and tracks hover on it.
   Widget _wrapHover(Widget child) {
     if (bubbleLink == null) return child;
@@ -788,7 +829,17 @@ class _ChatBubbleCore extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   if (!isSender) ...[
-                    _ChatBubbleSenderAvatar(senderId: message.senderId),
+                    _ChatBubbleSenderAvatar(
+                      senderId: message.senderId,
+                      // Group chat: tap a member's avatar -> open their
+                      // individual chat.
+                      onTap: isGroupChat
+                          ? () => _openIndividualChat(
+                              context,
+                              message.senderId,
+                            )
+                          : null,
+                    ),
                     const SizedBox(width: 8),
                   ],
                   Flexible(
@@ -1507,7 +1558,8 @@ class _HoverIcon extends StatelessWidget {
 
 class _ChatBubbleSenderAvatar extends StatelessWidget {
   final String senderId;
-  const _ChatBubbleSenderAvatar({required this.senderId});
+  final VoidCallback? onTap;
+  const _ChatBubbleSenderAvatar({required this.senderId, this.onTap});
 
   static const double _size = 28;
 
@@ -1540,7 +1592,7 @@ class _ChatBubbleSenderAvatar extends StatelessWidget {
 
     // Letter is always drawn underneath; the photo covers it only once it has
     // loaded. If the image fails (CORS, 404, network...) the letter stays.
-    return SizedBox(
+    final avatar = SizedBox(
       width: _size,
       height: _size,
       child: Stack(
@@ -1567,6 +1619,16 @@ class _ChatBubbleSenderAvatar extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+
+    if (onTap == null) return avatar;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: avatar,
       ),
     );
   }

@@ -57,6 +57,8 @@ class _TicketEditState extends State<TicketEdit> {
 
   List<EmployeeModel> _employeeList = [];
   List<ProjectModel> _projectList = [];
+  // deal uid -> master client uid (fallback for projects with no client_id).
+  Map<String, String> _dealClientIds = {};
   List<TaskModel> _taskList = [];
   List<ClientModel> _masterClients = [];
   List<String> _selectedAssignTo = [];
@@ -126,6 +128,20 @@ class _TicketEditState extends State<TicketEdit> {
       _employeeList = await EmployeeService.getAllEmployees();
       _projectList.clear();
       _projectList = await ProjectService.getAllProjects();
+      try {
+        final deals = await DealService.getAllDeals();
+        _dealClientIds = {
+          for (final d in deals)
+            if ((d.uid ?? '').isNotEmpty && (d.clientId ?? '').isNotEmpty)
+              d.uid!: d.clientId!,
+        };
+      } catch (_) {}
+      for (final p in _projectList) {
+        debugPrint(
+          '[ticket-projects] ${p.projectName} | client_id=${p.clientId} | '
+          'deal_id=${p.dealId} | client_name=${p.client}',
+        );
+      }
       _taskList.clear();
       _taskList = await TaskService.getAllTasks();
       _masterClients = await ClientService.getMasterClients();
@@ -766,9 +782,23 @@ class _TicketEditState extends State<TicketEdit> {
   List<ProjectModel> get _clientProjects {
     final id = _selectedMasterClient?.uid;
     if (id == null || id.isEmpty) return [];
-    return _projectList
-        .where((p) => p.client == id || p.clientId == id)
-        .toList();
+    final c = _selectedMasterClient;
+    final names = <String>{
+      (c?.companyName ?? '').trim().toLowerCase(),
+      (c?.displayName).toString().trim().toLowerCase(),
+      (c?.clientName ?? '').trim().toLowerCase(),
+    }..remove('');
+    return _projectList.where((p) {
+      // 1) client_id saved on the project
+      final own = (p.clientId ?? '').trim();
+      if (own.isNotEmpty) return own == id;
+      // 2) the client of the deal the project was created from
+      final viaDeal = _dealClientIds[p.dealId] ?? '';
+      if (viaDeal.isNotEmpty) return viaDeal == id;
+      // 3) last resort: the client name the API sent with the project
+      final n = (p.client ?? '').trim().toLowerCase();
+      return n.isNotEmpty && names.contains(n);
+    }).toList();
   }
 
   /// Tasks of the selected Master Client's projects. Narrowed to the chosen

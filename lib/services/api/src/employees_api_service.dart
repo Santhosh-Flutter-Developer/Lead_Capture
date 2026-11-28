@@ -15,13 +15,11 @@ class EmployeesApiService {
       _c.post(ApiEndpoints.employees, action: 'update', body: {'uid': uid, ...f});
   static Future<ApiResponse> checkAssigned({required String uid, String? employeeId}) =>
       _c.post(ApiEndpoints.employees, action: 'check_assigned', body: {'uid': uid, if (employeeId != null) 'employee_id': employeeId});
-  /// Global (all companies) e-mail uniqueness check. `excludeUid` skips the
-  /// record being edited.
+  /// Live e-mail uniqueness check (employees.php check_email). Global across
+  /// ALL organizations; [excludeUid] skips the record being edited.
   static Future<ApiResponse> checkEmail({required String email, String? excludeUid}) =>
-      _c.post(ApiEndpoints.employees, action: 'check_email', body: {
-        'email': email.trim(),
-        if (excludeUid != null && excludeUid.isNotEmpty) 'exclude_uid': excludeUid,
-      });
+      _c.post(ApiEndpoints.employees, action: 'check_email',
+          body: {'email': email.trim(), if (excludeUid != null && excludeUid.isNotEmpty) 'exclude_uid': excludeUid});
   static Future<ApiResponse> block(String uid) => _c.post(ApiEndpoints.employees, action: 'block', body: {'uid': uid});
   static Future<ApiResponse> unblock(String uid) => _c.post(ApiEndpoints.employees, action: 'unblock', body: {'uid': uid});
   static Future<ApiResponse> restore(String uid) => _c.post(ApiEndpoints.employees, action: 'restore', body: {'uid': uid});

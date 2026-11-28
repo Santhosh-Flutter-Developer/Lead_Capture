@@ -32,6 +32,34 @@ class _AdminProfileState extends State<AdminProfile> {
     super.initState();
     _admin = widget.admin;
     _loadPermissions();
+    // The admin passed in may come from the cached login session (Spdb),
+    // which can be stale. Always pull the latest copy from the server.
+    _refreshFromServer();
+  }
+
+  /// Fetches the latest admin row from the server and, when it is the
+  /// logged-in admin, keeps the local session cache (Spdb) in sync so the
+  /// next time the profile is opened it does not show old data.
+  Future<void> _refreshFromServer() async {
+    final uid = _admin.uid;
+    if (uid == null || uid.isEmpty) return;
+    try {
+      final latest = await AdminService.getAdmin(uid: uid);
+      if (latest == null) return;
+      await _syncSession(latest);
+      if (mounted) setState(() => _admin = latest);
+    } catch (_) {}
+  }
+
+  Future<void> _syncSession(AdminModel latest) async {
+    final currentUid = await Spdb.getUid();
+    final cid = await Spdb.getCid();
+    if (currentUid != null &&
+        currentUid == latest.uid &&
+        cid != null &&
+        cid.isNotEmpty) {
+      await Spdb.setAdminLogin(model: latest, cid: cid);
+    }
   }
 
   @override
@@ -70,10 +98,13 @@ class _AdminProfileState extends State<AdminProfile> {
 
     try {
       final latest = await AdminService.getAdmin(uid: uid);
-      if (latest != null && mounted) {
-        setState(() {
-          _admin = latest;
-        });
+      if (latest != null) {
+        await _syncSession(latest);
+        if (mounted) {
+          setState(() {
+            _admin = latest;
+          });
+        }
       }
     } catch (_) {}
   }

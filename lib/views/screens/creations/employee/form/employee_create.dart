@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -119,6 +120,7 @@ class _EmployeeCreateState extends State<EmployeeCreate> {
   void dispose() {
     _employeeIdController.dispose();
     _nameController.dispose();
+    _emailDebounce?.cancel();
     _emailController.dispose();
     _passwordController.dispose();
     _mobileNumberController.dispose();
@@ -900,7 +902,12 @@ class _EmployeeCreateState extends State<EmployeeCreate> {
             hintText: 'Enter Email',
             isRequired: true,
             prefixIcon: const Icon(Iconsax.sms, size: 18),
-            valid: (input) => Validation.validEmail(input: input, isReq: true),
+            suffixIcon: _emailSuffix,
+            onChanged: _onEmailChanged,
+            errorText: _emailTakenError,
+            valid: (input) =>
+                Validation.validEmail(input: input, isReq: true) ??
+                _emailTakenError,
           ),
         ),
         SizedBox(
@@ -1449,7 +1456,75 @@ class _EmployeeCreateState extends State<EmployeeCreate> {
     );
   }
 
+  // ── Realtime e-mail uniqueness (global, via employees.php check_email) ──
+  Timer? _emailDebounce;
+  int _emailCheckSeq = 0;
+  bool _emailChecking = false;
+  String? _emailTakenError;
+  String _emailChecked = '';
+
+  bool get _emailFormatOk =>
+      Validation.validEmail(input: _emailController.text, isReq: true) == null;
+
+  void _onEmailChanged(String value) {
+    _emailDebounce?.cancel();
+    final email = value.trim();
+    if (email.toLowerCase() == _emailChecked) return;
+    if (_emailTakenError != null || _emailChecking) {
+      setState(() {
+        _emailTakenError = null;
+        _emailChecking = false;
+      });
+    }
+    _emailCheckSeq++;
+    if (!_emailFormatOk) return;
+    _emailDebounce = Timer(const Duration(milliseconds: 500), _checkEmailNow);
+  }
+
+  Future<void> _checkEmailNow() async {
+    _emailDebounce?.cancel();
+    final email = _emailController.text.trim();
+    if (!_emailFormatOk) return;
+    final seq = ++_emailCheckSeq;
+    if (mounted) setState(() => _emailChecking = true);
+    final err = await EmployeeService.checkEmailTaken(
+      email: email,
+      excludeUid: null,
+    );
+    if (!mounted || seq != _emailCheckSeq) return; // a newer keystroke won
+    setState(() {
+      _emailChecking = false;
+      _emailTakenError = err;
+      _emailChecked = err == null ? email.toLowerCase() : '';
+    });
+  }
+
+  Widget? get _emailSuffix {
+    if (_emailChecking) {
+      return const Padding(
+        padding: EdgeInsets.all(10),
+        child: SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      );
+    }
+    if (_emailTakenError == null && _emailChecked.isNotEmpty && _emailFormatOk) {
+      return const Icon(Icons.check_circle, size: 18, color: Colors.green);
+    }
+    return null;
+  }
+
   void _submitForm() async {
+    // Make sure the latest e-mail has been checked against the server.
+    if (_emailFormatOk && _emailChecked != _emailController.text.trim().toLowerCase()) {
+      await _checkEmailNow();
+    }
+    if (_emailTakenError != null || _emailChecking) {
+      _formKey.currentState?.validate();
+      return;
+    }
     if (_formKey.currentState!.validate()) {
       try {
         if (isAdmin) {

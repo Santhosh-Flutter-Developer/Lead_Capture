@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import '/constants/constants.dart';
 import '/services/services.dart';
 import '/utils/utils.dart';
@@ -14,6 +16,7 @@ class RealtimeService {
 
   static StreamSubscription? _nSub;
   static StreamSubscription? _mSub;
+  static StreamSubscription? _cSub;
   static Timer? _debounce;
   static final Set<String> _pending = {};
 
@@ -35,8 +38,33 @@ class RealtimeService {
         userName: user.name.isEmpty ? 'User' : user.name,
       );
 
+      // Chat messages pushed by the server: refresh the open chat and the
+      // chat list AT ONCE. Without this the socket being connected slowed the
+      // chat polling down (30 s / 90 s), so group messages looked "missing".
+      _cSub = s.onChatMessage.listen((data) {
+        final chatUid = Js.s(data['chat_uid']);
+        ChatService.addSocketMessage(data);
+        ApiLive.changed({'chats', if (chatUid.isNotEmpty) 'chat:$chatUid'});
+      });
+
       _nSub = s.onNotification.listen((data) async {
+        // Only notifications addressed to THIS user in THIS company.
+        final rec = Js.s(data['recipient_uid']).trim();
+        if (rec.isNotEmpty && rec != 'all' && rec != uid) return;
+        final dc = Js.s(data['company_id']).trim();
+        if (dc.isNotEmpty && dc != cid.toString()) return;
         _touch({'notifications'});
+        if (Js.s(data['type']).toLowerCase() == 'chat') {
+          var raw = data['payload'];
+          if (raw is String && raw.trim().startsWith('{')) {
+            try {
+              raw = jsonDecode(raw);
+            } catch (_) {}
+          }
+          final p = Js.m(raw);
+          final chatUid = Js.s(p['chatId'] ?? p['chat_uid'] ?? p['chatUid']);
+          ApiLive.changed({'chats', if (chatUid.isNotEmpty) 'chat:$chatUid'});
+        }
         final type = Js.s(data['type']).toLowerCase();
         final ref = Js.s(Js.m(data['payload'])['uid'] ?? data['task_uid'] ?? data['ticket_uid']);
         if (type == 'task' && ref.isNotEmpty) _touch({'tasks', 'task_$ref'});
@@ -79,7 +107,15 @@ class RealtimeService {
   static Timer? _poll;
   static bool _primed = false;
 
+  /// Android / iOS / web: while the app is NOT in the foreground the server's
+  /// FCM push (it carries a `notification` block) is shown by the system. A
+  /// second local notification from the socket / poll would be a duplicate.
+  static bool get _inForeground =>
+      WidgetsBinding.instance.lifecycleState == null ||
+      WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+
   static Future<void> _showOnDevice(Map<String, dynamic> data) async {
+    if (!_inForeground) return; // FCM system notification covers it
     final me = (await Spdb.getUid())?.trim() ?? '';
     final n = CrmMappers.notification(data, myUid: me);
     if (!FirestoreNotificationListener.claim(n.uid ?? '')) return;
@@ -102,6 +138,7 @@ class RealtimeService {
           if (id.isEmpty) continue;
           if (!FirestoreNotificationListener.claim(id)) continue;
           if (!_primed) continue; // first poll only records what exists
+          if (!_inForeground) continue; // FCM system notification covers it
           if (n.readBy.contains(uid)) continue;
           final c = n.createdAt;
           if (c != null && DateTime.now().difference(c).inSeconds > 120) continue;
@@ -131,7 +168,8 @@ class RealtimeService {
     ApiLive.socketConnected = () => false;
     await _nSub?.cancel();
     await _mSub?.cancel();
-    _nSub = _mSub = null;
+    await _cSub?.cancel();
+    _nSub = _mSub = _cSub = null;
     _debounce?.cancel();
     _poll?.cancel();
     _poll = null;
